@@ -21,10 +21,9 @@
             <thead>
                 <tr>
                     <th>用例名称</th>
-                    <th>结果</th>
+                    <th>描述</th>
                     <th>步骤数</th>
-                    <th>耗时</th>
-                    <th>执行时间</th>
+                    <th>创建时间</th>
                     <th>操作</th>
                 </tr>
             </thead>
@@ -75,15 +74,14 @@ function loadCases(page) {
 function renderTable(data) {
     const tbody = document.getElementById('casesTableBody');
     if (!data.data || data.data.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="loading-cell">暂无数据</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="loading-cell">暂无数据</td></tr>';
         return;
     }
     tbody.innerHTML = data.data.map(c => `
         <tr>
             <td><a href="javascript:void(0)" onclick="showDetail('${c.id}')">${escapeHtml(c.name)}</a></td>
-            <td><span class="badge ${c.passed ? 'badge-success' : 'badge-danger'}">${c.passed ? '通过' : '失败'}</span></td>
+            <td>${escapeHtml(c.description || '-')}</td>
             <td>${c.step_count || 0}</td>
-            <td>${(c.elapsed_seconds || 0).toFixed(1)}s</td>
             <td>${c.created_at || ''}</td>
             <td>
                 <button class="btn btn-sm btn-primary" onclick="showDetail('${c.id}')">详情</button>
@@ -131,7 +129,8 @@ function showDetail(id) {
             if (c.steps_log && c.steps_log.length > 0) {
                 html += '<h4>执行步骤</h4><ol>';
                 c.steps_log.forEach(s => {
-                    html += `<li>${escapeHtml(s.action || '')} - ${s.result && s.result.success ? '成功' : '失败'}</li>`;
+                    const desc = s.description || s.action || '';
+                    html += `<li>${escapeHtml(desc)} - ${s.result && s.result.success ? '成功' : '失败'}</li>`;
                 });
                 html += '</ol>';
             }
@@ -148,13 +147,15 @@ function closeDetail() {
 }
 
 function deleteCase(id) {
+    if (!id) { alert('无效的用例ID'); return; }
     if (!confirm('确定删除该用例吗？')) return;
     fetch('/api/cases/' + id, {method: 'DELETE'})
         .then(r => r.json())
         .then(data => {
             if (data.success) loadCases(currentPage);
-            else alert('删除失败');
-        });
+            else alert('删除失败：' + (data.message || '未知错误'));
+        })
+        .catch(e => { alert('请求失败：' + e.message); });
 }
 
 function deleteCurrentCase() {

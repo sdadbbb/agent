@@ -57,6 +57,41 @@ class AgentEngine:
         """将工具名转为中文"""
         return TOOL_NAME_CN.get(tool_name, tool_name)
 
+    @staticmethod
+    def _step_desc(tool_name, args):
+        """生成步骤的中文描述"""
+        cn = TOOL_NAME_CN.get(tool_name, tool_name)
+        if tool_name == 'browser_navigate':
+            return f'{cn}：{args.get("url", "")}'
+        elif tool_name == 'browser_fill':
+            text = args.get('text', '')
+            selector = args.get('selector', '')
+            return f'{cn}"{text}"到 {selector}'
+        elif tool_name == 'browser_click':
+            text = args.get('text', '')
+            selector = args.get('selector', '')
+            if text:
+                return f'{cn}"{text}" ({selector})'
+            return f'{cn}：{selector}'
+        elif tool_name == 'browser_wait':
+            return f'{cn}{args.get("seconds", "")}秒'
+        elif tool_name == 'browser_press_key':
+            return f'{cn}：{args.get("key", "")}'
+        elif tool_name == 'browser_select_option':
+            return f'{cn}"{args.get("value", "")}"'
+        elif tool_name == 'browser_get_text':
+            return f'{cn}：{args.get("selector", "页面")}'
+        elif tool_name == 'browser_scroll':
+            direction = args.get('direction', '')
+            return f'{cn}：{direction}' if direction else cn
+        elif tool_name == 'browser_screenshot':
+            return cn
+        elif tool_name == 'browser_get_page_state':
+            return cn
+        elif tool_name == 'done':
+            return cn
+        return cn
+
     def set_callback(self, callback):
         self._on_step_callback = callback
 
@@ -90,14 +125,12 @@ class AgentEngine:
             self.step_log.append({
                 'step': 1, 'action': 'browser_navigate',
                 'params': {'url': url}, 'result': nav_result,
-                'passed': nav_result.get('success', False)
+                'passed': nav_result.get('success', False),
+                'description': self._step_desc('browser_navigate', {'url': url})
             })
             if not nav_result.get('success', False):
                 return {'success': False, 'error': f'导航失败: {url}', 'task': task_description, 'steps': self.step_log}
             self._emit('result', '页面打开成功')
-
-            # 保存初始页面截图
-            self._wait_and_screenshot('init')
 
             # 3. ReAct 单步循环（支持批量执行）
             step_count = len(self.step_log)
@@ -136,7 +169,8 @@ class AgentEngine:
                         self.step_log.append({
                             'step': step_count, 'action': tool_name,
                             'params': args, 'result': {'success': False, 'error': f'未知工具: {tool_name}'},
-                            'passed': False
+                            'passed': False,
+                            'description': self._step_desc(tool_name, args)
                         })
                         continue
 
@@ -146,7 +180,8 @@ class AgentEngine:
                     self.step_log.append({
                         'step': step_count, 'action': tool_name,
                         'params': args, 'result': exec_result,
-                        'passed': passed
+                        'passed': passed,
+                        'description': self._step_desc(tool_name, args)
                     })
 
                     if passed:
@@ -178,6 +213,19 @@ class AgentEngine:
 
             elapsed = (datetime.now() - self.start_time).total_seconds()
             all_passed = all(s.get('passed', False) for s in self.step_log) if self.step_log else False
+
+            # 只有导航步骤则视为无有效步骤，清理截图
+            useful_steps = [s for s in self.step_log if s.get('action') != 'browser_navigate']
+            if not useful_steps:
+                self._emit('status', '未生成有效步骤，清理截图...')
+                for sp in self.screenshots:
+                    try:
+                        if os.path.exists(sp):
+                            os.remove(sp)
+                    except Exception:
+                        pass
+                self.screenshots = []
+
             result = {
                 'success': all_passed,
                 'task': task_description,
@@ -244,19 +292,47 @@ class AgentEngine:
         return None
 
     def _extract_json(self, text):
-        """从 LLM 回复中提取 JSON（支持对象 {} 或数组 []）"""
+        """从 LLM 回复中提取 JSON（清洗常见格式问题）"""
+        # 去掉 markdown 代码块
         match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
         if match:
             text = match.group(1)
         # 先尝试找 {}
         match = re.search(r'\{[\s\S]*\}', text)
         if match:
-            return match.group(0).strip()
+            return self._sanitize_json(match.group(0).strip())
         # 再尝试找 []
         match = re.search(r'\[[\s\S]*\]', text)
         if match:
-            return match.group(0).strip()
+            return self._sanitize_json(match.group(0).strip())
         return text.strip()
+
+    def _sanitize_json(self, text):
+        """清洗 LLM 输出的伪 JSON：去尾随逗号、补全残缺数组"""
+        # 去除行尾注释
+        text = re.sub(r'//.*$', '', text, flags=re.MULTILINE)
+        # 去除尾随逗号（}, 或 ], 或 "value", 后紧跟 ] 或 }）
+        text = re.sub(r',\s*([}\]])', r'\1', text)
+        return text
+
+    @staticmethod
+    def _try_parse_json(json_str):
+        """尝试解析 JSON，失败则尝试逐个提取对象"""
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+        # 数组解析失败，尝试逐个提取 {...} 对象
+        objects = []
+        for m in re.finditer(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', json_str):
+            try:
+                obj = json.loads(m.group(0))
+                objects.append(obj)
+            except json.JSONDecodeError:
+                continue
+        if objects:
+            return objects
+        raise json.JSONDecodeError('无法解析 LLM 返回的 JSON', json_str, 0)
 
     def _ask_llm_for_next_steps(self, task_description, page_state):
         """让 LLM 决定下一步操作（支持批量返回多个步骤）"""
@@ -269,7 +345,7 @@ class AgentEngine:
 
         try:
             json_str = self._extract_json(content)
-            parsed = json.loads(json_str)
+            parsed = self._try_parse_json(json_str)
 
             # 兼容单对象和数组格式
             if isinstance(parsed, dict):

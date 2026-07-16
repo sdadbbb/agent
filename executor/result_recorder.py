@@ -1,9 +1,8 @@
-"""执行结果记录器 - 将 Agent 执行结果持久化"""
+"""执行结果记录器 - 将 Agent 执行结果分别保存到用例和报告"""
 import os
 import json
-from datetime import datetime
+from cases.case_models import TestCase, ReportResult
 from log.logger import LoggerUtil
-from cases.case_models import TestCase
 
 logger = LoggerUtil.get_logger()
 
@@ -16,26 +15,31 @@ class ResultRecorder:
         os.makedirs(self.results_dir, exist_ok=True)
 
     def save(self, result: dict):
-        """保存执行结果"""
+        """保存执行结果（用例 + 报告分开存储，steps_log 归用例）"""
         try:
-            case = TestCase(
-                name=result.get('task', '未命名任务')[:50],
-                task=result.get('task', ''),
-                passed=result.get('success', False),
-                steps_log=result.get('steps', []),
-                screenshots=result.get('screenshots', []),
-                elapsed_seconds=result.get('elapsed_seconds', 0),
-                conclusion=result.get('report', '')[:500]
-            )
-            # 保存到 cases 目录
             from cases.case_manager import CaseManager
             cm = CaseManager()
+
+            task = result.get('task', '未命名任务')
+            name = task[:50] if task else '未命名任务'
+
+            # 1. 保存用例（含执行步骤）
+            case = TestCase(
+                name=name,
+                task=task,
+                steps_log=result.get('steps', []),
+            )
             cm.save_case(case)
 
-            # 同时保存原始结果到 results 目录
-            filepath = os.path.join(self.results_dir, f'{case.id}.json')
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(result, f, ensure_ascii=False, indent=2)
+            # 2. 保存报告（结果+截图，不含步骤）
+            report = ReportResult(
+                case_id=case.id,
+                passed=result.get('success', False),
+                screenshots=result.get('screenshots', []),
+                conclusion=result.get('report', '')[:500],
+                elapsed_seconds=result.get('elapsed_seconds', 0),
+            )
+            cm.save_result(report)
 
             logger.info(f"执行结果已保存: {case.id}")
             return case.id

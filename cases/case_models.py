@@ -1,7 +1,7 @@
 """测试用例数据模型"""
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
-from typing import List, Optional
+from typing import List
 
 
 @dataclass
@@ -17,15 +17,11 @@ class StepLog:
 
 @dataclass
 class TestCase:
-    """测试用例/执行记录"""
+    """测试用例：定义 + 执行步骤"""
     name: str = ''
     description: str = ''
     task: str = ''
-    passed: bool = False
     steps_log: List[dict] = field(default_factory=list)
-    screenshots: List[str] = field(default_factory=list)
-    conclusion: str = ''
-    elapsed_seconds: float = 0.0
     id: str = ''
     created_at: str = ''
     tags: List[str] = field(default_factory=list)
@@ -41,4 +37,28 @@ class TestCase:
 
     @staticmethod
     def from_dict(data: dict):
-        return TestCase(**{k: v for k, v in data.items() if k in TestCase.__dataclass_fields__})
+        fields = {f for f in TestCase.__dataclass_fields__}
+        return TestCase(**{k: v for k, v in data.items() if k in fields})
+
+
+@dataclass
+class ReportResult:
+    """执行结果（报告专用：结果+截图）"""
+    case_id: str = ''
+    passed: bool = False
+    screenshots: List[str] = field(default_factory=list)
+    conclusion: str = ''
+    elapsed_seconds: float = 0.0
+    executed_at: str = ''
+
+    def __post_init__(self):
+        if not self.executed_at:
+            self.executed_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    def to_dict(self):
+        return asdict(self)
+
+    @staticmethod
+    def from_dict(data: dict):
+        fields = {f for f in ReportResult.__dataclass_fields__}
+        return ReportResult(**{k: v for k, v in data.items() if k in fields})

@@ -1,7 +1,7 @@
 """Agent 用例管理工具 - 保存执行结果与查询历史"""
 from log.logger import LoggerUtil
 from cases.case_manager import CaseManager
-from cases.case_models import TestCase, StepLog
+from cases.case_models import TestCase, ReportResult
 
 logger = LoggerUtil.get_logger()
 case_manager = CaseManager()
@@ -48,21 +48,30 @@ CASE_TOOLS_SPEC = [
 def execute_save_test_result(args):
     """保存测试结果"""
     try:
+        # 1. 保存用例（含执行步骤摘要）
         case = TestCase(
             name=args['case_name'],
             description=args.get('description', ''),
             task=args.get('task', ''),
-            passed=args['passed'],
-            conclusion=args.get('conclusion', '')
+            steps_log=[{'action': args.get('steps_summary', ''), 'result': {'success': args['passed']}}],
         )
         saved = case_manager.save_case(case)
-        logger.info(f"测试结果已保存: {saved.name} ({saved.id}) - {'通过' if saved.passed else '失败'}")
+
+        # 2. 保存报告结果
+        report = ReportResult(
+            case_id=saved.id,
+            passed=args['passed'],
+            conclusion=args.get('conclusion', ''),
+        )
+        case_manager.save_result(report)
+
+        logger.info(f"测试结果已保存: {saved.name} ({saved.id}) - {'通过' if args['passed'] else '失败'}")
         return {
             'success': True,
             'result': {
                 'case_id': saved.id,
                 'case_name': saved.name,
-                'passed': saved.passed,
+                'passed': args['passed'],
                 'message': f'测试结果已保存: {saved.name} (ID: {saved.id})'
             }
         }

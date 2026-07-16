@@ -12,30 +12,28 @@ case_exporter = CaseExporter()
 
 @cases_bp.route('/api/cases', methods=['GET'])
 def list_cases():
-    """分页查询用例列表"""
+    """查询用例列表（仅元数据）"""
     page = request.args.get('page', 1, type=int)
     page_size = request.args.get('page_size', 10, type=int)
     keyword = request.args.get('keyword', '').strip()
-    status = request.args.get('status', '').strip()
-    result = case_manager.list_cases(page=page, page_size=page_size, keyword=keyword, status=status)
+    result = case_manager.list_cases(page=page, page_size=page_size, keyword=keyword)
     return jsonify({'success': True, 'data': result})
 
 
 @cases_bp.route('/api/cases/<case_id>', methods=['GET'])
 def get_case(case_id):
-    """获取用例详情"""
-    case = case_manager.get_case(case_id)
-    if case:
-        return jsonify({'success': True, 'data': case.to_dict()})
+    """获取用例详情（含执行报告的合并数据）"""
+    report = case_manager.get_report(case_id)
+    if report:
+        return jsonify({'success': True, 'data': report})
     return jsonify({'success': False, 'message': '用例不存在'})
 
 
 @cases_bp.route('/api/cases/<case_id>', methods=['DELETE'])
 def delete_case(case_id):
     """删除用例"""
-    if case_manager.delete_case(case_id):
-        return jsonify({'success': True, 'message': '删除成功'})
-    return jsonify({'success': False, 'message': '删除失败'})
+    case_manager.delete_case(case_id)
+    return jsonify({'success': True, 'message': '用例已删除'})
 
 
 @cases_bp.route('/api/cases/<case_id>', methods=['PUT'])

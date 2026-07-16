@@ -19,30 +19,30 @@ class CaseExporter:
 
     def export_to_csv(self, case_id):
         """导出单个用例为CSV"""
-        case = case_manager.get_case(case_id)
-        if not case:
+        report = case_manager.get_report(case_id)
+        if not report:
             return None, '用例不存在'
 
-        filename = f'{case.name}_{case.id[:8]}.csv'
+        filename = f'{report["name"]}_{case_id[:8]}.csv'
         filepath = os.path.join(self.export_dir, filename)
 
         with open(filepath, 'w', encoding='utf-8-sig', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['字段', '内容'])
-            writer.writerow(['用例名称', case.name])
-            writer.writerow(['描述', case.description])
-            writer.writerow(['执行结果', '通过' if case.passed else '失败'])
-            writer.writerow(['执行时间', case.created_at])
-            writer.writerow(['耗时(秒)', case.elapsed_seconds])
+            writer.writerow(['用例名称', report['name']])
+            writer.writerow(['描述', report.get('description', '')])
+            writer.writerow(['执行结果', '通过' if report.get('passed') else '失败'])
+            writer.writerow(['执行时间', report.get('executed_at', report.get('created_at', ''))])
+            writer.writerow(['耗时(秒)', report.get('elapsed_seconds', 0)])
             writer.writerow([])
             writer.writerow(['步骤', '操作', '结果'])
-            for i, step in enumerate(case.steps_log, 1):
+            for i, step in enumerate(report.get('steps_log', []), 1):
                 passed = '通过' if step.get('passed', False) else '失败'
-                action = step.get('action', '')
+                desc = step.get('description', step.get('action', ''))
                 result = json.dumps(step.get('result', {}), ensure_ascii=False)[:200]
-                writer.writerow([i, action, f'{passed} | {result}'])
+                writer.writerow([i, desc, f'{passed} | {result}'])
             writer.writerow([])
-            writer.writerow(['测试结论', case.conclusion])
+            writer.writerow(['测试结论', report.get('conclusion', '')])
 
         logger.info(f"CSV导出成功: {filepath}")
         return filepath, filename
@@ -51,11 +51,11 @@ class CaseExporter:
         """导出为XLSX"""
         try:
             from openpyxl import Workbook
-            case = case_manager.get_case(case_id)
-            if not case:
+            report = case_manager.get_report(case_id)
+            if not report:
                 return None, '用例不存在'
 
-            filename = f'{case.name}_{case.id[:8]}.xlsx'
+            filename = f'{report["name"]}_{case_id[:8]}.xlsx'
             filepath = os.path.join(self.export_dir, filename)
 
             wb = Workbook()
@@ -64,17 +64,17 @@ class CaseExporter:
 
             ws.append(['测试用例报告'])
             ws.append([])
-            ws.append(['用例名称', case.name])
-            ws.append(['描述', case.description])
-            ws.append(['执行结果', '通过' if case.passed else '失败'])
-            ws.append(['执行时间', case.created_at])
-            ws.append(['耗时(秒)', case.elapsed_seconds])
+            ws.append(['用例名称', report['name']])
+            ws.append(['描述', report.get('description', '')])
+            ws.append(['执行结果', '通过' if report.get('passed') else '失败'])
+            ws.append(['执行时间', report.get('executed_at', report.get('created_at', ''))])
+            ws.append(['耗时(秒)', report.get('elapsed_seconds', 0)])
             ws.append([])
             ws.append(['步骤', '操作', '参数', '结果'])
-            for i, step in enumerate(case.steps_log, 1):
+            for i, step in enumerate(report.get('steps_log', []), 1):
                 ws.append([i, step.get('action', ''), json.dumps(step.get('params', {}), ensure_ascii=False), json.dumps(step.get('result', {}), ensure_ascii=False)[:200]])
             ws.append([])
-            ws.append(['测试结论', case.conclusion])
+            ws.append(['测试结论', report.get('conclusion', '')])
 
             wb.save(filepath)
             logger.info(f"XLSX导出成功: {filepath}")

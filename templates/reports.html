@@ -74,7 +74,7 @@ function loadStats() {
 
 function loadReports(page) {
     currentPage = page || 1;
-    fetch('/api/cases?page=' + currentPage + '&page_size=' + pageSize)
+    fetch('/api/reports?page=' + currentPage + '&page_size=' + pageSize)
         .then(r => r.json())
         .then(data => {
             if (!data.success) return;
@@ -91,7 +91,7 @@ function loadReports(page) {
                     <td><span class="badge ${c.passed ? 'badge-success' : 'badge-danger'}">${c.passed ? '通过' : '失败'}</span></td>
                     <td>${c.step_count || 0}</td>
                     <td>${(c.elapsed_seconds || 0).toFixed(1)}s</td>
-                    <td>${c.created_at || ''}</td>
+                    <td>${c.executed_at || ''}</td>
                     <td>
                         <button class="btn btn-sm btn-primary" onclick="viewReport('${c.id}')">查看报告</button>
                         <button class="btn btn-sm btn-danger" onclick="deleteReport('${c.id}')">删除</button>
@@ -126,13 +126,13 @@ function renderPagination(total, current) {
 }
 
 function viewReport(id) {
-    fetch('/api/reports/case/' + id + '/report')
+    fetch('/api/reports/' + id)
         .then(r => r.json())
         .then(data => {
             if (!data.success) return;
             const c = data.data;
             let html = `<p><strong>名称：</strong>${escapeHtml(c.name)}</p>`;
-            html += `<p><strong>结果：</strong>${c.passed ? '通过' : '失败'} | 耗时：${(c.elapsed_seconds || 0).toFixed(1)}s | 时间：${c.created_at || ''}</p>`;
+            html += `<p><strong>结果：</strong>${c.passed ? '通过' : '失败'} | 耗时：${(c.elapsed_seconds || 0).toFixed(1)}s | 时间：${c.executed_at || c.created_at || ''}</p>`;
             if (c.task) html += `<p><strong>任务：</strong>${escapeHtml(c.task)}</p>`;
             if (c.screenshots && c.screenshots.length > 0) {
                 html += '<h4>截图证据</h4><div class="screenshot-horizontal">';
@@ -145,7 +145,8 @@ function viewReport(id) {
                 html += '<h4>执行步骤</h4><table class="data-table"><thead><tr><th>步骤</th><th>操作</th><th>结果</th></tr></thead><tbody>';
                 c.steps_log.forEach((s, i) => {
                     const success = s.result && s.result.success;
-                    html += `<tr><td>${i+1}</td><td>${escapeHtml(s.action || '')}</td><td><span class="badge ${success ? 'badge-success' : 'badge-danger'}">${success ? '成功' : '失败'}</span></td></tr>`;
+                    const desc = s.description || s.action || '';
+                    html += `<tr><td>${i+1}</td><td>${escapeHtml(desc)}</td><td><span class="badge ${success ? 'badge-success' : 'badge-danger'}">${success ? '成功' : '失败'}</span></td></tr>`;
                 });
                 html += '</tbody></table>';
             }
@@ -162,12 +163,15 @@ function closeReport() {
 }
 
 function deleteReport(id) {
-    if (!confirm('确定删除该报告吗？')) return;
-    fetch('/api/cases/' + id, {method: 'DELETE'})
+    if (!id) { alert('无效的用例ID'); return; }
+    if (!confirm('确定删除该报告吗？截图和结果数据将被清除，用例会保留。')) return;
+    fetch('/api/reports/' + id, {method: 'DELETE'})
         .then(r => r.json())
         .then(data => {
             if (data.success) { loadReports(); loadStats(); }
-        });
+            else { alert('删除失败：' + (data.message || '未知错误')); }
+        })
+        .catch(e => { alert('请求失败：' + e.message); });
 }
 
 function escapeHtml(text) {
