@@ -1,5 +1,4 @@
 """Agent 系统提示词"""
-import json
 
 
 AGENT_SYSTEM_PROMPT = """你是一个 AI 测试工程师，你可以操控浏览器来完成用户指定的测试任务。
@@ -44,7 +43,7 @@ STEP_PROMPT = """你是一个 AI 测试工程师。你面前的浏览器已经�
 【当前页面 URL】
 {url}
 
-【页面中可交互的元素】
+【页面中可交互的元素（弹窗/对话框内元素优先展示）】
 {elements}
 
 【页面可见文本摘要】
@@ -87,6 +86,30 @@ STEP_PROMPT = """你是一个 AI 测试工程师。你面前的浏览器已经�
  {{"tool": "browser_select_option", "args": {{"selector": "select[name='city']", "value": "beijing"}}}},
  {{"tool": "browser_fill", "args": {{"selector": "textarea[name='remark']", "text": "备注信息"}}}}]
 
+【弹窗/对话框处理流程（必须严格执行！）】
+当元素列表中出现了 【弹窗/对话框: xxx】 区域时，说明当前页面已经弹出了一个弹窗/对话框。
+此时你必须按以下流程操作，不要调用 wait，不要犹豫，直接执行：
+
+步骤1：分析弹窗内所有需要填写的输入框
+  - 根据 placeholder、aria_label 判断每个输入框的含义
+  - 根据测试任务推断应该填入什么值
+  - 非必填的输入框可以跳过
+  - 【重要】弹窗内元素的选择器已经带上了弹窗作用域（如 .ant-modal input[...]），直接复制使用即可
+
+步骤2：批量填写 + 点击确定
+  - 将所有 browser_fill 操作打包为批量数组
+  - 批量末尾加上 browser_click 点击弹窗中的"确定"/"保存"/"提交"按钮
+  - 示例（新增用户弹窗）：
+  [{{"tool": "browser_fill", "args": {{"selector": ".ant-modal input[placeholder='用户编号']", "text": "U001"}}}},
+   {{"tool": "browser_fill", "args": {{"selector": ".ant-modal input[placeholder='用户名称']", "text": "测试员"}}}},
+   {{"tool": "browser_fill", "args": {{"selector": ".ant-modal input[placeholder='用户密码']", "text": "pass123"}}}},
+   {{"tool": "browser_click", "args": {{"selector": ".ant-modal button:has-text('确定')"}}}}]
+
+步骤3：弹窗关闭后验证结果
+  - 下一次决策时，元素列表中不再有 【弹窗/对话框】 区域，说明弹窗已关闭
+  - 此时需要在页面主区域验证操作结果：搜索刚才新增的数据、检查列表是否多了一条记录等
+  - 如果页面有搜索框，先 fill 填入关键词，再 click 搜索按钮，最后用 browser_get_text 检查结果
+
 【关键规则】
 - 输入类操作（fill、select_option、press_key）后无需额外验证
 - 点击、提交等**可能改变页面状态的操作**后，必须在下一次决策中用 get_page_state 或 get_text 验证结果
@@ -123,20 +146,69 @@ def build_step_prompt(task_description, page_state, history):
     """基于页面真实状态和已完成步骤，构建单步决策提示词"""
     raw = page_state if isinstance(page_state, dict) else {}
     state = raw.get('result', raw)
-    elements_json = json.dumps(
-        state.get('elements', state.get('interactive_elements', [])),
-        ensure_ascii=False, indent=2
-    )
-    text = state.get('text', state.get('visible_text', ''))[:500]
+    raw_elements = state.get('elements', state.get('interactive_elements', []))
+
+    # 按 container 分组：弹窗/modal/dialog 优先，page 元素只保留摘要
+    groups = {}
+    for el in raw_elements:
+        c = el.get('container', 'page')
+        groups.setdefault(c, []).append(el)
+
+    parts = []
+    total_el_shown = 0
+
+    # 先输出非 page 的容器（弹窗/对话框等）
+    for cname, els in groups.items():
+        if cname == 'page':
+            continue
+        parts.append(f'【弹窗/对话框: {cname}】({len(els)}个元素)')
+        # 弹窗内元素全量展示（关键信息精简）
+        for el in els:
+            info = _format_element(el)
+            parts.append(f'  {info}')
+            total_el_shown += 1
+
+    # page 级别元素：只显示最关键的（按钮、有文本的输入框）+ 总数
+    page_els = groups.get('page', [])
+    if page_els:
+        key_page = [el for el in page_els if el.get('tag') in ('button', 'a') and el.get('text')]
+        other_count = len(page_els)
+        parts.append(f'【页面主区域】共 {other_count} 个元素，重点:')
+        for el in key_page:
+            parts.append(f'  {_format_element(el)}')
+            total_el_shown += 1
+        # 也加上有 placeholder 的 input
+        for el in page_els:
+            if el.get('placeholder') and el.get('tag') == 'input':
+                parts.append(f'  {_format_element(el)}')
+                total_el_shown += 1
+
+    elements_text = '\n'.join(parts)
+
+    text = state.get('text', state.get('visible_text', ''))[:800]
     history_text = '\n'.join([
-        f"  {s['step']}. {s['action']} - {'通过' if s.get('passed') else '失败'}"
-        for s in history[-10:]  # 只看最近 10 步，避免上下文过长
+        f"  {s['step']}. {s.get('description', s['action'])} - {'通过' if s.get('passed') else '失败'}"
+        for s in history[-10:]
     ]) if history else '  暂无'
     return STEP_PROMPT.format(
         task=task_description,
         title=state.get('title', ''),
         url=state.get('url', ''),
-        elements=elements_json[:2000],
+        elements=elements_text,
         text=text,
         history=history_text
     )
+
+
+def _format_element(el):
+    """将单个元素格式化为精简的一行描述"""
+    tag = el.get('tag', '')
+    text = el.get('text', '')
+    placeholder = el.get('placeholder', '')
+    aria = el.get('aria_label', '')
+    name = el.get('name', '')
+    sel = el.get('selector', '')
+    role = el.get('role', '')
+
+    label = aria or placeholder or text or name or role or ''
+    return f'{tag}[{sel}] {label}'[:120]

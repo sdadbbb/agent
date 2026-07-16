@@ -45,11 +45,25 @@ class PageSnapshot:
 
                 function getContainer(el) {
                     let parent = el.parentElement;
-                    while (parent) {
+                    while (parent && parent !== document.body) {
                         const role = parent.getAttribute('role') || '';
                         const tag = parent.tagName.toLowerCase();
-                        const cls = (parent.className || '').toString();
-                        if (role.includes('dialog') || tag === 'dialog' || cls.includes('modal') || cls.includes('dialog') || cls.includes('popup')) {
+                        const cls = (parent.className || '').toString().toLowerCase();
+                        const style = window.getComputedStyle(parent);
+                        const zIndex = parseInt(style.zIndex) || 0;
+                        const position = style.position || '';
+                        // 角色/标签检测
+                        if (role.includes('dialog') || tag === 'dialog' || role.includes('alertdialog')) {
+                            return (parent.getAttribute('aria-label') || parent.id || tag + (cls ? '.' + cls.split(' ')[0] : '')).slice(0, 40);
+                        }
+                        // 常见 UI 框架 class 检测
+                        if (cls.includes('modal') || cls.includes('dialog') || cls.includes('popup') ||
+                            cls.includes('drawer') || cls.includes('overlay') || cls.includes('mask') ||
+                            cls.includes('layer')) {
+                            return (parent.getAttribute('aria-label') || parent.id || tag + (cls ? '.' + cls.split(' ')[0] : '')).slice(0, 40);
+                        }
+                        // 高 z-index 的 fixed/absolute 元素（自定义弹窗）
+                        if ((position === 'fixed' || position === 'absolute') && zIndex > 100) {
                             return (parent.getAttribute('aria-label') || parent.id || tag + (cls ? '.' + cls.split(' ')[0] : '')).slice(0, 40);
                         }
                         parent = parent.parentElement;
@@ -80,7 +94,13 @@ class PageSnapshot:
                 return results;
             }''')
             for el in elements:
-                el['selector'] = self._build_selector(el['tag'], el, el['text'])
+                base = self._build_selector(el['tag'], el, el['text'])
+                # 弹窗内元素：加容器前缀，确保选择器只命中弹窗内的元素
+                container = el.get('container', 'page')
+                if container != 'page' and base:
+                    el['selector'] = _scope_selector(container, base)
+                else:
+                    el['selector'] = base
         except Exception as e:
             logger.error(f"获取交互元素失败: {str(e)}")
         # 按容器分组输出日志
@@ -100,12 +120,14 @@ class PageSnapshot:
         if attrs.get('aria_label'):
             selectors.append(f'{tag}[aria-label="{attrs["aria_label"]}"]')
         if text and len(text) < 80:
+            # 规范化空白：多个连续空白→单个空格，保留中文字符间的真实空格
+            clean_text = ' '.join(text.split())
             if tag == 'button':
-                selectors.append(f'button:has-text("{text}")')
+                selectors.append(f'button:has-text("{clean_text}")')
             elif tag == 'a':
-                selectors.append(f'a:has-text("{text}")')
+                selectors.append(f'a:has-text("{clean_text}")')
             else:
-                selectors.append(f'{tag}:has-text("{text}")')
+                selectors.append(f'{tag}:has-text("{clean_text}")')
         if attrs.get('placeholder'):
             selectors.append(f'{tag}[placeholder="{attrs["placeholder"]}"]')
         if attrs.get('name'):
@@ -161,3 +183,20 @@ class PageSnapshot:
             }''')
         except Exception:
             return ''
+
+
+def _scope_selector(container, base):
+    """将容器名转为 CSS 前缀，生成弹窗内唯一选择器
+    
+    container 格式如: div.ant-modal, div#myModal, div.modal.fade
+    → 提取为 .ant-modal, #myModal, .modal.fade 作为前缀
+    """
+    parts = container.split('.')
+    tag = parts[0]
+    if '#' in tag:
+        id_part = '#' + tag.split('#', 1)[1]
+        return f'{id_part} {base}'
+    if len(parts) > 1:
+        cls = '.'.join(parts[1:])
+        return f'.{cls} {base}'
+    return f'{container} {base}'

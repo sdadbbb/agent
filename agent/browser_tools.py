@@ -171,17 +171,15 @@ def _locate_element(page, selector, timeout=10000):
             locator = page.locator(strategy_selector)
             if locator.count() > 0:
                 first = locator.first
-                # 放宽可见性检查：先看是否存在，能交互更好
-                if locator.count() > 0:
-                    try:
-                        if first.is_visible(timeout=1000):
-                            logger.info(f"元素定位成功 [策略={name}]: {strategy_selector}")
-                            return first, name
-                    except Exception:
-                        pass
-                    # 不可见也返回，让 click/fill 自行尝试
-                    logger.info(f"元素定位成功 [策略={name}, 可能不可见]: {strategy_selector}")
-                    return first, name
+                try:
+                    if first.is_visible(timeout=1000):
+                        logger.info(f"元素定位成功 [策略={name}]: {strategy_selector}")
+                        return first, name
+                except Exception:
+                    pass
+                # 不可见也返回，让 click/fill 自行尝试
+                logger.info(f"元素定位成功 [策略={name}, 可能不可见]: {strategy_selector}")
+                return first, name
         except Exception:
             continue
 
@@ -301,7 +299,7 @@ def execute_browser_get_page_state(args):
                 'url': state['url'],
                 'title': state['title'],
                 'visible_text': state['visible_text'][:1000],
-                'interactive_elements': state['interactive_elements'][:20]
+                'interactive_elements': state['interactive_elements']
             }
         }
     except Exception as e:
@@ -320,8 +318,14 @@ def execute_browser_click(args):
         if locator is None:
             return {'success': False, 'error': f'无法定位元素: {selector}'}
 
-        # 三级点击兜底
-        click_success = False
+        # 四级点击兜底
+        # 点击前尝试滚动到可视区域
+        try:
+            locator.scroll_into_view_if_needed(timeout=3000)
+            page.wait_for_timeout(300)
+        except Exception:
+            pass
+
         # 1. 标准点击
         try:
             locator.click(timeout=3000)
@@ -333,13 +337,28 @@ def execute_browser_click(args):
                 locator.click(force=True, timeout=3000)
                 click_success = True
             except Exception as e2:
-                logger.warning(f"强制点击失败: {selector} - {e2}, 尝试原生事件派发...")
-                # 3. 原生 JS 事件派发（最可靠）
+                logger.warning(f"强制点击失败: {selector} - {e2}, 尝试 dispatchEvent...")
+                # 3. Playwright dispatchEvent（绕过可见性检查）
                 try:
-                    page.evaluate('(selector) => { document.querySelector(selector)?.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true})) }', selector)
+                    locator.dispatch_event('click')
                     click_success = True
                 except Exception as e3:
-                    return {'success': False, 'error': f'三级点击全部失败: {e3}'}
+                    logger.warning(f"dispatchEvent 失败: {selector} - {e3}, 尝试原生DOM点击...")
+                    # 4. 原生 DOM 点击（最终兜底，绕过一切检查）
+                    try:
+                        locator.evaluate('''el => {
+                            el.scrollIntoView({block: "center"});
+                            el.focus();
+                            const r = el.getBoundingClientRect();
+                            const cx = r.left + r.width/2, cy = r.top + r.height/2;
+                            el.dispatchEvent(new PointerEvent("pointerdown", {bubbles: true, clientX: cx, clientY: cy}));
+                            el.dispatchEvent(new PointerEvent("pointerup", {bubbles: true, clientX: cx, clientY: cy}));
+                            el.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true, clientX: cx, clientY: cy}));
+                        }''')
+                        page.wait_for_timeout(500)
+                        click_success = True
+                    except Exception as e4:
+                        return {'success': False, 'error': f'四级点击全部失败: {e4}'}
 
         logger.info(f"点击成功: {selector} [策略={strategy}]")
         return {'success': True, 'result': f"已点击元素: {selector} [策略={strategy}]"}
@@ -360,7 +379,6 @@ def execute_browser_fill(args):
         if locator is None:
             return {'success': False, 'error': f'无法定位输入框: {selector}'}
 
-        locator.click()
         locator.fill(text)
         logger.info(f"填入成功: {selector} [策略={strategy}]")
         return {'success': True, 'result': f"已填入文本: {text} [策略={strategy}]"}
