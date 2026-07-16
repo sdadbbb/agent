@@ -6,7 +6,8 @@
         <h2>AI 自然语言测试</h2>
         <p class="subtitle">用自然语言描述测试任务，Agent 将自动操控浏览器完成测试</p>
         <div class="input-row">
-            <textarea id="taskInput" placeholder="描述测试任务，例如：打开 https://example.com/login，测试用户登录功能，使用用户名 admin 密码 123456 登录..." rows="3"></textarea>
+            <input type="text" id="caseNameInput" placeholder="用例名称（可选，不填自动取任务前50字）" style="margin-bottom:8px; width:100%; padding:8px 12px; border:1px solid #d0d5dd; border-radius:6px; font-size:14px;">
+            <textarea id="taskInput" placeholder="描述测试任务，例如：https://example.com/login，测试用户登录功能，使用用户名 admin 密码 123456 登录..." rows="3"></textarea>
         </div>
         <div class="btn-row">
             <button class="btn btn-primary" onclick="startAgent()" id="startBtn">开始执行</button>
@@ -51,6 +52,7 @@ async function startAgent() {
         alert('请输入测试任务描述');
         return;
     }
+    const caseName = document.getElementById('caseNameInput').value.trim();
 
     document.getElementById('executionSection').style.display = 'block';
     document.getElementById('reportSection').style.display = 'none';
@@ -63,7 +65,7 @@ async function startAgent() {
         const res = await fetch('/api/agent/execute', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({task})
+            body: JSON.stringify({task, case_name: caseName})
         });
         const data = await res.json();
         if (!data.success) {

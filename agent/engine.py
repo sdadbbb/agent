@@ -98,9 +98,10 @@ class AgentEngine:
     def stop(self):
         self._stopped = True
 
-    def execute(self, task_description):
+    def execute(self, task_description, case_name=''):
         """执行测试任务 - ReAct 单步循环"""
         self.task_description = task_description
+        self.case_name = case_name
         self.start_time = datetime.now()
         self.step_log = []
         self.screenshots = []
@@ -228,6 +229,7 @@ class AgentEngine:
 
             result = {
                 'success': all_passed,
+                'case_name': self.case_name,
                 'task': task_description,
                 'report': report,
                 'steps': self.step_log,

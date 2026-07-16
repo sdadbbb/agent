@@ -21,11 +21,11 @@ class ResultRecorder:
             cm = CaseManager()
 
             task = result.get('task', '未命名任务')
-            name = task[:50] if task else '未命名任务'
+            case_name = result.get('case_name', '') or task[:50]
 
             # 1. 保存用例（含执行步骤）
             case = TestCase(
-                name=name,
+                name=case_name,
                 task=task,
                 steps_log=result.get('steps', []),
             )

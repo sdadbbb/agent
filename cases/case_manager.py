@@ -70,7 +70,7 @@ class CaseManager:
                     data = json.load(f)
                 if keyword:
                     kw = keyword.lower()
-                    if kw not in data.get('name', '').lower() and kw not in data.get('task', '').lower():
+                    if kw not in data.get('name', '').lower():
                         continue
                 cases.append({
                     'id': data.get('id', ''),

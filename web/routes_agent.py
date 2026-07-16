@@ -28,6 +28,7 @@ def execute_agent():
     """启动 Agent 执行"""
     data = request.get_json() or {}
     task = data.get('task', '').strip()
+    case_name = data.get('case_name', '').strip()
     if not task:
         return jsonify({'success': False, 'message': '请输入测试任务描述'})
 
@@ -49,7 +50,7 @@ def execute_agent():
         # 在后台线程执行
         def run():
             try:
-                result = engine.execute(task)
+                result = engine.execute(task, case_name=case_name)
                 msg_queue.put({'type': 'complete', 'data': result})
             except Exception as e:
                 msg_queue.put({'type': 'error', 'data': str(e)})
