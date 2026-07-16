@@ -1,0 +1,185 @@
+{% extends "layout.html" %}
+{% block title %}用例管理 - AI 测试 Agent{% endblock %}
+{% block content %}
+<div class="cases-panel">
+    <div class="page-header">
+        <h2>测试用例管理</h2>
+    </div>
+
+    <div class="filter-bar">
+        <input type="text" id="searchInput" placeholder="搜索用例名称或任务..." onkeyup="searchCases()">
+        <select id="statusFilter" onchange="searchCases()">
+            <option value="">全部状态</option>
+            <option value="passed">通过</option>
+            <option value="failed">失败</option>
+        </select>
+        <button class="btn btn-primary" onclick="loadCases(1)">搜索</button>
+    </div>
+
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>用例名称</th>
+                    <th>结果</th>
+                    <th>步骤数</th>
+                    <th>耗时</th>
+                    <th>执行时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="casesTableBody">
+                <tr><td colspan="6" class="loading-cell">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="pagination" id="pagination"></div>
+</div>
+
+<!-- 详情弹窗 -->
+<div class="modal" id="detailModal" style="display:none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>用例详情</h3>
+            <button class="close-btn" onclick="closeDetail()">X</button>
+        </div>
+        <div class="modal-body" id="detailBody"></div>
+        <div class="modal-footer">
+            <button class="btn btn-primary" onclick="exportCase()">导出CSV</button>
+            <button class="btn btn-success" onclick="exportCaseXlsx()">导出XLSX</button>
+            <button class="btn btn-danger" onclick="deleteCurrentCase()">删除</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentPage = 1;
+let currentCaseId = null;
+
+function loadCases(page) {
+    currentPage = page || 1;
+    const keyword = document.getElementById('searchInput').value;
+    const status = document.getElementById('statusFilter').value;
+    const params = new URLSearchParams({page: currentPage, page_size: 10, keyword, status});
+
+    fetch('/api/cases?' + params)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) return;
+            renderTable(data.data);
+            renderPagination(data.data);
+        });
+}
+
+function renderTable(data) {
+    const tbody = document.getElementById('casesTableBody');
+    if (!data.data || data.data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="loading-cell">暂无数据</td></tr>';
+        return;
+    }
+    tbody.innerHTML = data.data.map(c => `
+        <tr>
+            <td><a href="javascript:void(0)" onclick="showDetail('${c.id}')">${escapeHtml(c.name)}</a></td>
+            <td><span class="badge ${c.passed ? 'badge-success' : 'badge-danger'}">${c.passed ? '通过' : '失败'}</span></td>
+            <td>${c.step_count || 0}</td>
+            <td>${(c.elapsed_seconds || 0).toFixed(1)}s</td>
+            <td>${c.created_at || ''}</td>
+            <td>
+                <button class="btn btn-sm btn-primary" onclick="showDetail('${c.id}')">详情</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteCase('${c.id}')">删除</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function renderPagination(data) {
+    const el = document.getElementById('pagination');
+    if (data.total_pages <= 1) { el.innerHTML = ''; return; }
+
+    let html = '<div class="pagination-bar">';
+    html += `<button class="btn btn-sm" onclick="loadCases(${data.page - 1})" ${data.page <= 1 ? 'disabled' : ''}>上一页</button>`;
+
+    for (let i = 1; i <= data.total_pages; i++) {
+        if (i === 1 || i === data.total_pages || (i >= data.page - 1 && i <= data.page + 1)) {
+            html += `<button class="btn btn-sm ${i === data.page ? 'btn-primary' : ''}" onclick="loadCases(${i})">${i}</button>`;
+        } else if (i === data.page - 2 || i === data.page + 2) {
+            html += '<span class="ellipsis">...</span>';
+        }
+    }
+
+    html += `<button class="btn btn-sm" onclick="loadCases(${data.page + 1})" ${data.page >= data.total_pages ? 'disabled' : ''}>下一页</button>`;
+    html += ` <span class="page-info">共 ${data.total} 条</span>`;
+    html += '</div>';
+    el.innerHTML = html;
+}
+
+function searchCases() { loadCases(1); }
+
+function showDetail(id) {
+    currentCaseId = id;
+    fetch('/api/cases/' + id)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) return;
+            const c = data.data;
+            let html = `<p><strong>名称：</strong>${escapeHtml(c.name)}</p>`;
+            html += `<p><strong>描述：</strong>${escapeHtml(c.description || '')}</p>`;
+            html += `<p><strong>任务：</strong>${escapeHtml(c.task || '')}</p>`;
+            html += `<p><strong>结果：</strong>${c.passed ? '通过' : '失败'} | <strong>耗时：</strong>${(c.elapsed_seconds || 0).toFixed(1)}s</p>`;
+            html += `<p><strong>执行时间：</strong>${c.created_at || ''}</p>`;
+            if (c.steps_log && c.steps_log.length > 0) {
+                html += '<h4>执行步骤</h4><ol>';
+                c.steps_log.forEach(s => {
+                    html += `<li>${escapeHtml(s.action || '')} - ${s.result && s.result.success ? '成功' : '失败'}</li>`;
+                });
+                html += '</ol>';
+            }
+            if (c.conclusion) {
+                html += `<h4>测试结论</h4><pre style="white-space:pre-wrap;">${escapeHtml(c.conclusion)}</pre>`;
+            }
+            document.getElementById('detailBody').innerHTML = html;
+            document.getElementById('detailModal').style.display = 'flex';
+        });
+}
+
+function closeDetail() {
+    document.getElementById('detailModal').style.display = 'none';
+}
+
+function deleteCase(id) {
+    if (!confirm('确定删除该用例吗？')) return;
+    fetch('/api/cases/' + id, {method: 'DELETE'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) loadCases(currentPage);
+            else alert('删除失败');
+        });
+}
+
+function deleteCurrentCase() {
+    if (currentCaseId) deleteCase(currentCaseId);
+    closeDetail();
+}
+
+function exportCase() {
+    if (!currentCaseId) return;
+    window.open('/api/cases/export/' + currentCaseId + '?format=csv', '_blank');
+}
+
+function exportCaseXlsx() {
+    if (!currentCaseId) return;
+    window.open('/api/cases/export/' + currentCaseId + '?format=xlsx', '_blank');
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// 初始化
+loadCases(1);
+</script>
+{% endblock %}

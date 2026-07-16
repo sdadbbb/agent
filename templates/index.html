@@ -1,0 +1,197 @@
+{% extends "layout.html" %}
+{% block title %}Agent 执行 - AI 测试 Agent{% endblock %}
+{% block content %}
+<div class="agent-panel">
+    <div class="input-section">
+        <h2>AI 自然语言测试</h2>
+        <p class="subtitle">用自然语言描述测试任务，Agent 将自动操控浏览器完成测试</p>
+        <div class="input-row">
+            <textarea id="taskInput" placeholder="描述测试任务，例如：打开 https://example.com/login，测试用户登录功能，使用用户名 admin 密码 123456 登录..." rows="3"></textarea>
+        </div>
+        <div class="btn-row">
+            <button class="btn btn-primary" onclick="startAgent()" id="startBtn">开始执行</button>
+            <button class="btn btn-danger" onclick="stopAgent()" id="stopBtn" style="display:none;">停止执行</button>
+            <button class="btn btn-secondary" onclick="clearLog()">清空日志</button>
+        </div>
+    </div>
+
+    <div class="execution-section" id="executionSection" style="display:none;">
+        <div class="status-bar">
+            <span class="status-indicator" id="statusIndicator"></span>
+            <span class="status-text" id="statusText">等待执行...</span>
+        </div>
+
+        <div class="log-section">
+            <h3>执行过程</h3>
+            <div class="log-container" id="logContainer">
+                <div class="log-empty">点击"开始执行"启动 Agent</div>
+            </div>
+        </div>
+
+        <div class="report-section" id="reportSection" style="display:none;">
+            <h3>测试报告</h3>
+            <div class="report-content" id="reportContent"></div>
+
+            <div class="report-actions">
+                <button class="btn btn-primary" onclick="exportReport()">导出报告</button>
+                <button class="btn btn-success" onclick="saveCase()">保存用例</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const AGENT_SSE_URL = '/api/agent/stream';
+let currentTaskId = null;
+let eventSource = null;
+
+async function startAgent() {
+    const task = document.getElementById('taskInput').value.trim();
+    if (!task) {
+        alert('请输入测试任务描述');
+        return;
+    }
+
+    document.getElementById('executionSection').style.display = 'block';
+    document.getElementById('reportSection').style.display = 'none';
+    document.getElementById('startBtn').style.display = 'none';
+    document.getElementById('stopBtn').style.display = 'inline-block';
+    document.getElementById('logContainer').innerHTML = '';
+    setStatus('running', '执行中...');
+
+    try {
+        const res = await fetch('/api/agent/execute', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({task})
+        });
+        const data = await res.json();
+        if (!data.success) {
+            addLog('error', '启动失败: ' + data.message);
+            resetButtons();
+            return;
+        }
+
+        currentTaskId = data.task_id;
+        connectSSE(currentTaskId);
+    } catch (e) {
+        addLog('error', '请求失败: ' + e.message);
+        resetButtons();
+    }
+}
+
+function connectSSE(taskId) {
+    eventSource = new EventSource(`${AGENT_SSE_URL}/${taskId}`);
+
+    eventSource.onmessage = function(event) {
+        try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'heartbeat') return;
+
+            if (data.type === 'status') {
+                addLog('status', data.data);
+            } else if (data.type === 'step') {
+                addLog('step', data.data);
+            } else if (data.type === 'action') {
+                addLog('action', data.data);
+            } else if (data.type === 'result') {
+                addLog('result', data.data);
+            } else if (data.type === 'info') {
+                addLog('info', data.data);
+            } else if (data.type === 'complete') {
+                onComplete(data.data);
+            } else if (data.type === 'error') {
+                addLog('error', data.data);
+                resetButtons();
+            }
+        } catch (e) {
+            console.error('SSE parse error:', e);
+        }
+    };
+
+    eventSource.onerror = function() {
+        eventSource.close();
+        resetButtons();
+    };
+}
+
+function onComplete(result) {
+    setStatus('success', '执行完成');
+    addLog('status', 'Agent 执行完成');
+
+    if (result.report) {
+        document.getElementById('reportSection').style.display = 'block';
+        document.getElementById('reportContent').innerHTML = formatReport(result.report);
+    }
+
+    resetButtons();
+    if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+    }
+}
+
+function stopAgent() {
+    if (currentTaskId) {
+        fetch(`/api/agent/stop/${currentTaskId}`, {method: 'POST'});
+        addLog('status', '已发送停止信号');
+    }
+    if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+    }
+    resetButtons();
+}
+
+function resetButtons() {
+    document.getElementById('startBtn').style.display = 'inline-block';
+    document.getElementById('stopBtn').style.display = 'none';
+    setStatus('idle', '已停止');
+}
+
+function setStatus(type, text) {
+    const indicator = document.getElementById('statusIndicator');
+    const statusText = document.getElementById('statusText');
+    indicator.className = 'status-indicator ' + type;
+    statusText.textContent = text;
+}
+
+function addLog(type, message) {
+    const container = document.getElementById('logContainer');
+    const div = document.createElement('div');
+    div.className = 'log-entry log-' + type;
+
+    const time = new Date().toLocaleTimeString();
+    const icons = {'status': '', 'step': '', 'action': '', 'result': '', 'error': '', 'info': ''};
+
+    div.innerHTML = `<span class="log-time">[${time}]</span> ${icons[type] || ''} <span class="log-msg">${escapeHtml(message)}</span>`;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+function formatReport(report) {
+    return '<pre style="white-space:pre-wrap;font-family:monospace;font-size:14px;line-height:1.6;">' + escapeHtml(report) + '</pre>';
+}
+
+function clearLog() {
+    document.getElementById('logContainer').innerHTML = '<div class="log-empty">日志已清空</div>';
+    document.getElementById('reportSection').style.display = 'none';
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function exportReport() {
+    if (!currentTaskId) return;
+    alert('导出功能开发中...');
+}
+
+async function saveCase() {
+    if (!currentTaskId) return;
+    alert('保存功能开发中...');
+}
+</script>
+{% endblock %}

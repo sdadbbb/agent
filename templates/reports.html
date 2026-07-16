@@ -1,0 +1,183 @@
+{% extends "layout.html" %}
+{% block title %}测试报告 - AI 测试 Agent{% endblock %}
+{% block content %}
+<div class="reports-panel">
+    <div class="page-header">
+        <h2>测试报告</h2>
+        <div class="stats-cards">
+            <div class="stat-card">
+                <div class="stat-number" id="totalCases">0</div>
+                <div class="stat-label">总用例</div>
+            </div>
+            <div class="stat-card stat-success">
+                <div class="stat-number" id="passedCases">0</div>
+                <div class="stat-label">通过</div>
+            </div>
+            <div class="stat-card stat-danger">
+                <div class="stat-number" id="failedCases">0</div>
+                <div class="stat-label">失败</div>
+            </div>
+            <div class="stat-card stat-info">
+                <div class="stat-number" id="passRate">0%</div>
+                <div class="stat-label">通过率</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>用例名称</th>
+                    <th>结果</th>
+                    <th>步骤数</th>
+                    <th>耗时</th>
+                    <th>执行时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="reportsTableBody">
+                <tr><td colspan="6" class="loading-cell">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="pagination" id="pagination"></div>
+</div>
+
+<!-- 报告详情弹窗 -->
+<div class="modal" id="reportModal" style="display:none;">
+    <div class="modal-content modal-lg">
+        <div class="modal-header">
+            <h3>完整报告</h3>
+            <button class="close-btn" onclick="closeReport()">X</button>
+        </div>
+        <div class="modal-body" id="reportDetailBody"></div>
+    </div>
+</div>
+
+<script>
+let currentPage = 1;
+const pageSize = 10;
+
+function loadStats() {
+    fetch('/api/stats/overview')
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) return;
+            document.getElementById('totalCases').textContent = data.data.total_cases;
+            document.getElementById('passedCases').textContent = data.data.passed;
+            document.getElementById('failedCases').textContent = data.data.failed;
+            document.getElementById('passRate').textContent = data.data.pass_rate + '%';
+        });
+}
+
+function loadReports(page) {
+    currentPage = page || 1;
+    fetch('/api/cases?page=' + currentPage + '&page_size=' + pageSize)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) return;
+            const list = data.data.data || [];
+            const tbody = document.getElementById('reportsTableBody');
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="loading-cell">暂无数据</td></tr>';
+                renderPagination(0, 1);
+                return;
+            }
+            tbody.innerHTML = list.map(c => `
+                <tr>
+                    <td>${escapeHtml(c.name)}</td>
+                    <td><span class="badge ${c.passed ? 'badge-success' : 'badge-danger'}">${c.passed ? '通过' : '失败'}</span></td>
+                    <td>${c.step_count || 0}</td>
+                    <td>${(c.elapsed_seconds || 0).toFixed(1)}s</td>
+                    <td>${c.created_at || ''}</td>
+                    <td>
+                        <button class="btn btn-sm btn-primary" onclick="viewReport('${c.id}')">查看报告</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteReport('${c.id}')">删除</button>
+                    </td>
+                </tr>
+            `).join('');
+            renderPagination(data.data.total, data.data.page);
+        });
+}
+
+function renderPagination(total, current) {
+    const container = document.getElementById('pagination');
+    if (!total) { container.innerHTML = ''; return; }
+    const totalPages = Math.ceil(total / pageSize);
+    if (totalPages <= 1) { container.innerHTML = ''; return; }
+
+    let html = '<button class="btn btn-sm" onclick="loadReports(1)" ' + (current === 1 ? 'disabled' : '') + '>首页</button>';
+    html += '<button class="btn btn-sm" onclick="loadReports(' + (current - 1) + ')" ' + (current === 1 ? 'disabled' : '') + '>上一页</button>';
+
+    let start = Math.max(1, current - 2);
+    let end = Math.min(totalPages, current + 2);
+    if (start > 1) { html += '<span class="page-ellipsis">...</span>'; }
+    for (let i = start; i <= end; i++) {
+        html += '<button class="btn btn-sm ' + (i === current ? 'btn-primary' : '') + '" onclick="loadReports(' + i + ')">' + i + '</button>';
+    }
+    if (end < totalPages) { html += '<span class="page-ellipsis">...</span>'; }
+
+    html += '<button class="btn btn-sm" onclick="loadReports(' + (current + 1) + ')" ' + (current === totalPages ? 'disabled' : '') + '>下一页</button>';
+    html += '<button class="btn btn-sm" onclick="loadReports(' + totalPages + ')" ' + (current === totalPages ? 'disabled' : '') + '>末页</button>';
+    html += '<span class="page-info">共 ' + totalPages + ' 页</span>';
+    container.innerHTML = html;
+}
+
+function viewReport(id) {
+    fetch('/api/reports/case/' + id + '/report')
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) return;
+            const c = data.data;
+            let html = `<p><strong>名称：</strong>${escapeHtml(c.name)}</p>`;
+            html += `<p><strong>结果：</strong>${c.passed ? '通过' : '失败'} | 耗时：${(c.elapsed_seconds || 0).toFixed(1)}s | 时间：${c.created_at || ''}</p>`;
+            if (c.task) html += `<p><strong>任务：</strong>${escapeHtml(c.task)}</p>`;
+            if (c.screenshots && c.screenshots.length > 0) {
+                html += '<h4>截图证据</h4><div class="screenshot-horizontal">';
+                c.screenshots.forEach(s => {
+                    html += `<img src="/api/reports/screenshots/${s}" class="screenshot-report" onclick="window.open('/api/reports/screenshots/${s}','_blank')">`;
+                });
+                html += '</div>';
+            }
+            if (c.steps_log && c.steps_log.length > 0) {
+                html += '<h4>执行步骤</h4><table class="data-table"><thead><tr><th>步骤</th><th>操作</th><th>结果</th></tr></thead><tbody>';
+                c.steps_log.forEach((s, i) => {
+                    const success = s.result && s.result.success;
+                    html += `<tr><td>${i+1}</td><td>${escapeHtml(s.action || '')}</td><td><span class="badge ${success ? 'badge-success' : 'badge-danger'}">${success ? '成功' : '失败'}</span></td></tr>`;
+                });
+                html += '</tbody></table>';
+            }
+            if (c.conclusion) {
+                html += `<h4>结论</h4><pre style="white-space:pre-wrap;">${escapeHtml(c.conclusion)}</pre>`;
+            }
+            document.getElementById('reportDetailBody').innerHTML = html;
+            document.getElementById('reportModal').style.display = 'flex';
+        });
+}
+
+function closeReport() {
+    document.getElementById('reportModal').style.display = 'none';
+}
+
+function deleteReport(id) {
+    if (!confirm('确定删除该报告吗？')) return;
+    fetch('/api/cases/' + id, {method: 'DELETE'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) { loadReports(); loadStats(); }
+        });
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+loadStats();
+loadReports();
+</script>
+{% endblock %}
