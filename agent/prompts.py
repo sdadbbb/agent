@@ -106,14 +106,16 @@ STEP_PROMPT = """你是一个 AI 测试工程师。你面前的浏览器已经�
 """
 
 
+
+
 def build_navigate_prompt(task_description):
     """构建导航提示词：提取 URL"""
     return (
-        '请分析以下任务，提取出要访问的网页URL。\n\n'
+        '请分析以下任务，找出其中包含的网页URL。\n\n'
         f'任务：{task_description}\n\n'
-        '如果任务中包含URL，直接返回该URL。\n'
-        '如果任务中没有明确URL，根据任务内容推断一个合理的URL。\n'
-        '只返回URL本身，不要包含其他内容。'
+        '如果任务中包含URL（包括IP地址等非标准格式），直接返回该URL。\n'
+        '如果任务中确实没有可访问的URL，回复 NONE，不要凭空生成。\n'
+        '只返回URL或NONE，不要包含其他内容。'
     )
 
 

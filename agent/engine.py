@@ -20,6 +20,23 @@ ALL_TOOL_EXECUTORS.update(BROWSER_TOOL_EXECUTORS)
 ALL_TOOL_EXECUTORS.update(CASE_TOOL_EXECUTORS)
 
 
+# 工具名 → 中文映射
+TOOL_NAME_CN = {
+    'browser_navigate': '打开页面',
+    'browser_click': '点击元素',
+    'browser_fill': '输入文本',
+    'browser_get_text': '获取文本',
+    'browser_wait': '等待',
+    'browser_select_option': '选择下拉',
+    'browser_press_key': '按键操作',
+    'browser_screenshot': '截图',
+    'browser_get_page_state': '获取页面状态',
+    'save_test_result': '保存测试结果',
+    'query_test_history': '查询历史记录',
+    'done': '任务完成',
+}
+
+
 class AgentEngine:
     """Agent 执行引擎 - ReAct 单步模式：每步都获取最新页面状态让 LLM 决策"""
 
@@ -34,6 +51,11 @@ class AgentEngine:
         self.task_description = ''
         self._stopped = False
         self._on_step_callback = None
+
+    @staticmethod
+    def _tool_cn(tool_name):
+        """将工具名转为中文"""
+        return TOOL_NAME_CN.get(tool_name, tool_name)
 
     def set_callback(self, callback):
         self._on_step_callback = callback
@@ -57,10 +79,10 @@ class AgentEngine:
             set_page(self.page)
 
             # 2. 提取 URL 并导航
-            self._emit('step', '正在分析任务并打开页面...')
+            self._emit('step', '正在分析任务...')
             url = self._extract_url(task_description)
             if not url:
-                return {'success': False, 'error': '无法从任务中提取URL', 'task': task_description, 'steps': self.step_log}
+                return {'success': False, 'error': '任务中未提供 URL，请在任务描述中包含目标网页地址（如 https://example.com/login）', 'task': task_description, 'steps': self.step_log}
 
             self._emit('action', f'打开页面: {url}')
             nav_executor = BROWSER_TOOL_EXECUTORS.get('browser_navigate')
@@ -104,8 +126,9 @@ class AgentEngine:
 
                     # 执行工具
                     step_count += 1
+                    cn_name = self._tool_cn(tool_name)
                     batch_label = f' (第{next_steps.index(next_step)+1}/{len(next_steps)}步)' if len(next_steps) > 1 else ''
-                    self._emit('action', f'步骤 {step_count}{batch_label}: {tool_name}')
+                    self._emit('action', f'步骤 {step_count}{batch_label}: {tool_name}({cn_name})')
 
                     executor = ALL_TOOL_EXECUTORS.get(tool_name)
                     if not executor:
@@ -128,10 +151,10 @@ class AgentEngine:
 
                     if passed:
                         self._wait_and_screenshot(f'step_{step_count}')
-                        self._emit('result', f'步骤 {step_count}{batch_label} 成功: {tool_name}')
+                        self._emit('result', f'步骤 {step_count}{batch_label} 成功: {tool_name}({cn_name})')
                     else:
                         error_msg = exec_result.get('error', '执行失败')
-                        self._emit('result', f'步骤 {step_count}{batch_label} 失败: {tool_name} - {error_msg}')
+                        self._emit('result', f'步骤 {step_count}{batch_label} 失败: {tool_name}({cn_name}) - {error_msg}')
                         self._emit('status', '批次中有步骤失败，基于当前页面状态重新规划...')
                         batch_failed = True
                         break  # 跳出批量执行，让 LLM 重新决策
@@ -197,19 +220,28 @@ class AgentEngine:
             pass
 
     def _extract_url(self, task_description):
-        """从任务中提取 URL"""
+        """从任务中提取 URL：先正则匹配，再 LLM 推断，都不行返回 None"""
         url_match = re.search(r'https?://[^\s,，。；;]+', task_description)
         if url_match:
             return url_match.group(0).rstrip('/')
 
+        # 正则没匹配到，让 LLM 尝试推断（可能 IP、非标准域名等）
         prompt = build_navigate_prompt(task_description)
         content = self.llm_client.chat([{'role': 'user', 'content': prompt}])
         url = content.strip()
-        if url.startswith('http'):
+        if url.upper() == 'NONE':
+            self._emit('info', 'LLM 判断任务中不包含 URL')
+            return None
+        # 已有协议前缀，直接返回
+        if url.lower().startswith(('http://', 'https://')):
             return url
+        # 裸 IP 或域名（如 192.168.1.1、example.com:8080），补全协议
+        if re.match(r'^[\w.-]+(:\d+)?(/.*)?$', url):
+            return f'http://{url}'
 
-        self._emit('info', '未能从任务中提取 URL，使用默认搜索')
-        return 'https://www.baidu.com'
+        # 无法识别，返回 None 退出执行
+        self._emit('info', f'正则与 LLM 均未能提取到 URL，LLM 返回: {content[:100]}')
+        return None
 
     def _extract_json(self, text):
         """从 LLM 回复中提取 JSON（支持对象 {} 或数组 []）"""
@@ -247,7 +279,7 @@ class AgentEngine:
             else:
                 raise ValueError("非对象/数组格式")
 
-            step_names = [s.get('tool', '?') for s in steps]
+            step_names = [f"{s.get('tool', '?')}({self._tool_cn(s.get('tool', '?'))})" for s in steps]
             logger.info(f"LLM 批量步骤 ({len(steps)}): {step_names}")
             return steps
         except (json.JSONDecodeError, ValueError) as e:
@@ -257,7 +289,7 @@ class AgentEngine:
     def _generate_report(self):
         """生成最终测试报告"""
         steps_summary = '\n'.join([
-            f"  {s['step']}. {s['action']} - {'通过' if s.get('passed') else '失败'}"
+            f"  {s['step']}. {self._tool_cn(s['action'])} - {'通过' if s.get('passed') else '失败'}"
             for s in self.step_log
         ])
         passed_count = sum(1 for s in self.step_log if s.get('passed'))
