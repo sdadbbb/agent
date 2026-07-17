@@ -1,10 +1,19 @@
 """Flask 应用入口"""
 import os
 import sys
-from flask import Flask, render_template
 
 # 添加项目根目录到 path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _get_base_dir():
+    """获取项目根目录（兼容 PyInstaller 打包）"""
+    if getattr(sys, 'frozen', False):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+from flask import Flask, render_template
 
 from web.routes_agent import agent_bp
 from web.routes_cases import cases_bp
@@ -13,9 +22,10 @@ from web.routes_reports import reports_bp
 
 
 def create_app():
+    base = _get_base_dir()
     app = Flask(__name__,
-                template_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'templates'),
-                static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'static'))
+                template_folder=os.path.join(base, 'templates'),
+                static_folder=os.path.join(base, 'static'))
 
     # 注册蓝图
     app.register_blueprint(agent_bp)
@@ -35,6 +45,12 @@ def create_app():
     @app.route('/reports')
     def reports_page():
         return render_template('reports.html')
+
+    @app.route('/api/shutdown', methods=['POST'])
+    def shutdown():
+        """关闭服务（桌面应用专用）"""
+        import os as _os
+        _os._exit(0)
 
     return app
 

@@ -13,6 +13,7 @@
             <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">Agent 执行</a>
             <a href="/cases" class="nav-link {% if request.path == '/cases' %}active{% endif %}">用例管理</a>
             <a href="/reports" class="nav-link {% if request.path == '/reports' %}active{% endif %}">测试报告</a>
+            <a href="#" class="nav-link nav-exit" onclick="shutdownApp()" title="关闭程序">退出</a>
         </div>
     </nav>
     <main class="container">
@@ -21,5 +22,15 @@
     <script src="/static/js/agent.js"></script>
     <script src="/static/js/cases.js"></script>
     <script src="/static/js/reports.js"></script>
+    <script>
+    function shutdownApp() {
+        if (!confirm('确定要退出程序吗？')) return;
+        fetch('/api/shutdown', { method: 'POST' })
+            .catch(function() {})
+            .finally(function() {
+                document.body.innerHTML = '<div style="text-align:center;padding-top:100px;font-size:18px;"><p>程序已关闭，可以关闭此页面。</p></div>';
+            });
+    }
+    </script>
 </body>
 </html>

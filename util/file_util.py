@@ -8,7 +8,11 @@ class FileUtil:
 
     @staticmethod
     def get_project_root():
-        """获取项目根目录"""
+        """获取项目根目录（兼容 PyInstaller 打包）"""
+        import sys as _sys
+        if getattr(_sys, 'frozen', False):
+            # PyInstaller 打包后，文件在 sys._MEIPASS 中
+            return _sys._MEIPASS
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     @staticmethod

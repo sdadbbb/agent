@@ -1,5 +1,6 @@
 """文件管理 API"""
 import os
+import sys
 from flask import Blueprint, send_file, jsonify, abort
 from log.logger import LoggerUtil
 from cases.exporter import CaseExporter
@@ -8,7 +9,15 @@ logger = LoggerUtil.get_logger()
 files_bp = Blueprint('files', __name__)
 case_exporter = CaseExporter()
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def _get_base_dir():
+    """获取项目根目录（兼容 PyInstaller 打包）"""
+    if getattr(sys, 'frozen', False):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+BASE_DIR = _get_base_dir()
 SCREENSHOTS_DIR = os.path.join(BASE_DIR, 'data', 'screenshots')
 
 
