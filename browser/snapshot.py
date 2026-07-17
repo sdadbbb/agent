@@ -41,7 +41,7 @@ class PageSnapshot:
         try:
             elements = self.page.evaluate('''() => {
                 const results = [];
-                const tags = 'button, a[href], input:not([type="hidden"]), select, textarea, [role="button"], [role="dialog"], [role="alertdialog"], [role="option"], [tabindex], dialog';
+                const tags = 'button, a[href], input:not([type="hidden"]), select, textarea, [role="button"], [role="dialog"], [role="alertdialog"], [role="option"], [tabindex], dialog, [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]';
 
                 function getContainer(el) {
                     let parent = el.parentElement;
