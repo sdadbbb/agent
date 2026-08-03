@@ -76,7 +76,7 @@ def stream_agent(task_id):
     def generate():
         while True:
             try:
-                data = msg_queue.get(timeout=1)
+                data = msg_queue.get(timeout=15)
                 if data.get('type') == 'done':
                     break
                 yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"

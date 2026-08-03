@@ -5,6 +5,18 @@
 __pycache__/
 *.pyc
 
+#dist/
+dist/
+
+#build/
+build/
+agent_tester.spec
+.gitignore 
+build_exe.py 
+debug.log 
+dist.zip 
+run.py  
+
 # Logs
 log/*.log
 

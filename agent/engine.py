@@ -51,6 +51,8 @@ class AgentEngine:
         self.task_description = ''
         self._stopped = False
         self._on_step_callback = None
+        self._screenshots_dir_ok = False
+        self._conversation = []  # 多轮对话上下文
 
     @staticmethod
     def _tool_cn(tool_name):
@@ -74,7 +76,8 @@ class AgentEngine:
                 return f'{cn}"{text}" ({selector})'
             return f'{cn}：{selector}'
         elif tool_name == 'browser_wait':
-            return f'{cn}{args.get("seconds", "")}秒'
+            ms = args.get('ms', '')
+            return f'{cn}{ms}毫秒' if ms else cn
         elif tool_name == 'browser_press_key':
             return f'{cn}：{args.get("key", "")}'
         elif tool_name == 'browser_select_option':
@@ -106,6 +109,7 @@ class AgentEngine:
         self.step_log = []
         self.screenshots = []
         self._stopped = False
+        self._conversation = []  # 重置多轮对话
 
         try:
             # 1. 初始化浏览器
@@ -261,7 +265,9 @@ class AgentEngine:
         except Exception:
             pass
         try:
-            os.makedirs('data/screenshots', exist_ok=True)
+            if not self._screenshots_dir_ok:
+                os.makedirs('data/screenshots', exist_ok=True)
+                self._screenshots_dir_ok = True
             ss_path = f'data/screenshots/{name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
             self.page.screenshot(path=ss_path)
             self.screenshots.append(ss_path)
@@ -337,13 +343,21 @@ class AgentEngine:
         raise json.JSONDecodeError('无法解析 LLM 返回的 JSON', json_str, 0)
 
     def _ask_llm_for_next_steps(self, task_description, page_state):
-        """让 LLM 决定下一步操作（支持批量返回多个步骤）"""
+        """让 LLM 决定下一步操作（支持批量返回多个步骤，利用多轮上下文）"""
         history = [s for s in self.step_log if s.get('action') != 'browser_get_page_state']
         prompt = build_step_prompt(task_description, page_state, history)
-        messages = [{'role': 'user', 'content': prompt}]
+        
+        # 首轮：发 system + user；后续轮次：只追加 user 消息，利用多轮上下文
+        if not self._conversation:
+            self._conversation.append({'role': 'user', 'content': prompt})
+        else:
+            self._conversation = self._conversation[-6:]  # 保留最近 3 轮（6条消息）
+            self._conversation.append({'role': 'user', 'content': prompt})
 
-        content = self.llm_client.chat(messages)
+        content = self.llm_client.chat(self._conversation)
         self._emit('info', f'LLM 决策: {content[:200]}')
+        # 记录 assistant 回复，供下一轮使用
+        self._conversation.append({'role': 'assistant', 'content': content})
 
         try:
             json_str = self._extract_json(content)
@@ -357,12 +371,45 @@ class AgentEngine:
             else:
                 raise ValueError("非对象/数组格式")
 
+            # 校验选择器：检查 LLM 返回的 selector 是否在页面元素中出现过
+            valid_selectors = self._extract_valid_selectors(page_state)
+            self._validate_selectors(steps, valid_selectors)
+
             step_names = [f"{s.get('tool', '?')}({self._tool_cn(s.get('tool', '?'))})" for s in steps]
             logger.info(f"LLM 批量步骤 ({len(steps)}): {step_names}")
             return steps
         except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"解析 LLM 决策失败: {str(e)}, 原始: {content[:300]}")
             return [{'tool': 'done', 'args': {'report': f'LLM 决策解析失败: {str(e)}'}}]
+
+    @staticmethod
+    def _extract_valid_selectors(page_state):
+        """从页面状态中提取所有有效的选择器（含备选）"""
+        raw = page_state if isinstance(page_state, dict) else {}
+        state = raw.get('result', raw)
+        elements = state.get('elements', state.get('interactive_elements', []))
+        valid = set()
+        for el in elements:
+            sel = el.get('selector')
+            if sel:
+                valid.add(sel)
+            for s in el.get('selectors', []):
+                if s:
+                    valid.add(s)
+        return valid
+
+    def _validate_selectors(self, steps, valid_selectors):
+        """校验步骤中的 selector 是否在页面元素中出现过，未命中则警告但不阻断"""
+        for i, step in enumerate(steps):
+            tool = step.get('tool', '')
+            args = step.get('args', {})
+            selector = args.get('selector', '')
+            if not selector or tool in ('done', 'browser_wait', 'browser_press_key', 'browser_screenshot', 'browser_get_page_state'):
+                continue
+            if selector not in valid_selectors:
+                logger.warning(
+                    f"LLM 返回的 selector 未在页面元素中找到: '{selector}'（步骤 {i+1}，将通过回退策略尝试定位）"
+                )
 
     def _generate_report(self):
         """生成最终测试报告"""

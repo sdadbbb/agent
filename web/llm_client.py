@@ -1,5 +1,6 @@
 """大模型客户端 - 兼容 OpenAI Chat Completions API"""
 import json
+import time
 import requests
 from log.logger import LoggerUtil
 
@@ -16,6 +17,7 @@ class LLMClient:
         self.timeout = config.get('timeout', 120)
         self.max_tokens = config.get('max_tokens')
         self.temperature = config.get('temperature', 0.3)
+        self.max_retries = 3
 
     def is_configured(self):
         return bool(self.api_key)
@@ -67,14 +69,24 @@ class LLMClient:
             raise Exception(f"无法连接到 {self.base_url}，请检查 base_url 配置")
 
     def chat(self, messages, temperature=None):
-        """普通对话"""
+        """普通对话（含重试）"""
         if not self.is_configured():
             raise ValueError('请在 config/config.yml 中配置 llm.api_key')
         payload = self._build_payload(messages, temperature=temperature)
-        data = self._request(payload)
-        content = data['choices'][0]['message']['content']
-        logger.info(f"回复长度: {len(content)} 字符")
-        return content
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                data = self._request(payload)
+                content = data['choices'][0]['message']['content']
+                logger.info(f"回复长度: {len(content)} 字符")
+                return content
+            except Exception as e:
+                last_error = e
+                if attempt < self.max_retries - 1:
+                    wait = 2 ** attempt
+                    logger.warning(f"LLM 请求失败（第{attempt+1}次），{wait}s 后重试: {str(e)[:100]}")
+                    time.sleep(wait)
+        raise last_error
 
     def chat_with_tools(self, messages, tools=None, temperature=None):
         """带工具调用的对话"""

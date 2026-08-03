@@ -35,97 +35,37 @@ AGENT_SYSTEM_PROMPT = """你是一个 AI 测试工程师，你可以操控浏览
 
 
 # 单步决策提示词（支持批量步骤输出）
-STEP_PROMPT = """你是一个 AI 测试工程师。你面前的浏览器已经打开了目标页面，以下是当前页面的最新状态：
+STEP_PROMPT = """你是一个 AI 测试工程师，浏览器已打开目标页面。
 
-【当前页面标题】
-{title}
+【页面: {title}】
+URL: {url}
 
-【当前页面 URL】
-{url}
-
-【页面中可交互的元素（弹窗/对话框内元素优先展示）】
+【可交互元素】
 {elements}
 
-【页面可见文本摘要】
+【可见文本摘要】
 {text}
 
-【已完成的步骤】
+【已完成】
 {history}
 
-【可用工具】
-- browser_click(selector): 点击元素
-- browser_fill(selector, text): 输入文本
-- browser_get_text(selector): 获取元素文本
-- browser_wait(ms): 等待
-- browser_select_option(selector, value): 选择下拉框
-- browser_press_key(key): 键盘按键
-- browser_get_page_state(): 获取页面状态
+【工具】click(selector) | fill(selector, text) | get_text(selector) | wait(ms) | select_option(selector, value) | press_key(key)
 
-（截图在每个步骤后自动保存，无需手动调用）
+【批量规则】支持数组格式一次输出多步。fill/wait/select_option/press_key 可批量，click 必须放批次末尾。示例：
+[{{"tool": "browser_fill", "args": {{"selector": "...", "text": "..."}}}},
+ {{"tool": "browser_click", "args": {{"selector": "..."}}}}]
 
-【批量执行规则（重要！可大幅加速）】
-为提高执行效率，你可以在一次响应中输出多个步骤（数组格式）：
-- 引擎会连续执行数组中的所有步骤，执行完毕后才获取新的页面状态供你下次决策
-- 不要在同一批次中放入 browser_get_text 后又依赖其结果做后续操作——因为 batch 内看不到中间结果
-- browser_click 会导致页面变化，通常放在批次末尾，后续步骤留给下一次决策
+【弹窗处理】看到【弹窗/对话框: xxx】则优先处理弹窗：批量 fill + click 确定按钮，弹窗关闭后验证结果。弹窗内选择器已带作用域，直接复制使用。
 
-适合放在同一批次的操作：
-  - browser_fill: 连续填入多个输入框
-  - browser_wait: 等待
-  - browser_select_option: 选择下拉框
-  - browser_press_key: 键盘按键
-  - browser_click: 只能作为批次的最后一个步骤
+【规则】
+- selector 必须从上方元素列表复制（格式 tag[selector] label），禁止自行构造
+- fill/select_option/press_key 后无需验证；click 后需验证
+- 完成后返回: {{"tool": "done", "args": {{"report": "结论"}}}}
+- done 单独输出，不放入批次
 
-批次示例（登录流程）：
-[{{"tool": "browser_fill", "args": {{"selector": "#username", "text": "admin"}}}},
- {{"tool": "browser_fill", "args": {{"selector": "#password", "text": "123456"}}}},
- {{"tool": "browser_click", "args": {{"selector": "button:has-text('登录')"}}}}]
+【任务】{task}
 
-批次示例（表单填写）：
-[{{"tool": "browser_fill", "args": {{"selector": "input[name='name']", "text": "张三"}}}},
- {{"tool": "browser_select_option", "args": {{"selector": "select[name='city']", "value": "beijing"}}}},
- {{"tool": "browser_fill", "args": {{"selector": "textarea[name='remark']", "text": "备注信息"}}}}]
-
-【弹窗/对话框处理流程（必须严格执行！）】
-当元素列表中出现了 【弹窗/对话框: xxx】 区域时，说明当前页面已经弹出了一个弹窗/对话框。
-此时你必须按以下流程操作，不要调用 wait，不要犹豫，直接执行：
-
-步骤1：分析弹窗内所有需要填写的输入框
-  - 根据 placeholder、aria_label 判断每个输入框的含义
-  - 根据测试任务推断应该填入什么值
-  - 非必填的输入框可以跳过
-  - 【重要】弹窗内元素的选择器已经带上了弹窗作用域（如 .ant-modal input[...]），直接复制使用即可
-
-步骤2：批量填写 + 点击确定
-  - 将所有 browser_fill 操作打包为批量数组
-  - 批量末尾加上 browser_click 点击弹窗中的"确定"/"保存"/"提交"按钮
-  - 示例（新增用户弹窗）：
-  [{{"tool": "browser_fill", "args": {{"selector": ".ant-modal input[placeholder='用户编号']", "text": "U001"}}}},
-   {{"tool": "browser_fill", "args": {{"selector": ".ant-modal input[placeholder='用户名称']", "text": "测试员"}}}},
-   {{"tool": "browser_fill", "args": {{"selector": ".ant-modal input[placeholder='用户密码']", "text": "pass123"}}}},
-   {{"tool": "browser_click", "args": {{"selector": ".ant-modal button:has-text('确定')"}}}}]
-
-步骤3：弹窗关闭后验证结果
-  - 下一次决策时，元素列表中不再有 【弹窗/对话框】 区域，说明弹窗已关闭
-  - 此时需要在页面主区域验证操作结果：搜索刚才新增的数据、检查列表是否多了一条记录等
-  - 如果页面有搜索框，先 fill 填入关键词，再 click 搜索按钮，最后用 browser_get_text 检查结果
-
-【关键规则】
-- 输入类操作（fill、select_option、press_key）后无需额外验证
-- 点击、提交等**可能改变页面状态的操作**后，必须在下一次决策中用 get_page_state 或 get_text 验证结果
-- 需要验证结果时（如用 get_text 检查页面内容），将该步骤单独输出或放在批次末尾
-- browser_get_page_state 无需调用——引擎每次决策前会自动获取
-- 如果所有操作已完成且验证通过，请返回 {{"tool": "done", "args": {{"report": "测试结论"}}}}
-- done 必须单独输出，不能放在批次中
-
-【测试任务】
-{task}
-
-【输出格式】
-可以输出单个对象：{{"tool": "工具名", "args": {{"参数名": "参数值"}}}}
-或者批量数组（推荐，加速执行）：[{{"tool": "工具名", "args": {{...}}}}, {{"tool": "工具名", "args": {{...}}}}]
-
-只输出 JSON，不要包含其他内容。
+只输出 JSON。
 """
 
 
@@ -168,18 +108,27 @@ def build_step_prompt(task_description, page_state, history):
             parts.append(f'  {info}')
             total_el_shown += 1
 
-    # page 级别元素：只显示最关键的（按钮、有文本的输入框）+ 总数
+    # page 级别元素：全部展示（按类型分组，让 LLM 全面了解页面结构）
     page_els = groups.get('page', [])
     if page_els:
-        key_page = [el for el in page_els if el.get('tag') in ('button', 'a') and el.get('text')]
-        other_count = len(page_els)
-        parts.append(f'【页面主区域】共 {other_count} 个元素，重点:')
-        for el in key_page:
-            parts.append(f'  {_format_element(el)}')
-            total_el_shown += 1
-        # 也加上有 placeholder 的 input
+        # 按标签分组
+        el_by_tag = {}
         for el in page_els:
-            if el.get('placeholder') and el.get('tag') == 'input':
+            tag = el.get('tag', 'other')
+            el_by_tag.setdefault(tag, []).append(el)
+        
+        parts.append(f'【页面主区域】共 {len(page_els)} 个元素')
+        # 按重要性排序：input/textarea/select > button > a > 其他
+        tag_order = ['input', 'textarea', 'select', 'button', 'a']
+        for tag in tag_order:
+            if tag in el_by_tag:
+                for el in el_by_tag[tag]:
+                    parts.append(f'  {_format_element(el)}')
+                    total_el_shown += 1
+                del el_by_tag[tag]
+        # 剩余其他类型
+        for tag, els in el_by_tag.items():
+            for el in els:
                 parts.append(f'  {_format_element(el)}')
                 total_el_shown += 1
 

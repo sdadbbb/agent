@@ -1,7 +1,4 @@
 """Agent 浏览器工具 - Function Calling 规范与执行函数"""
-import base64
-import os
-from datetime import datetime
 from log.logger import LoggerUtil
 from browser.snapshot import PageSnapshot
 
@@ -149,7 +146,7 @@ def _find_visible_in_locator(locator, max_check=20):
     for i in range(min(count, max_check)):
         el = locator.nth(i)
         try:
-            if el.is_visible(timeout=1000):
+            if el.is_visible(timeout=300):
                 return el
         except Exception:
             continue
@@ -189,48 +186,59 @@ def _try_css_round(page, selector):
             if locator.count() > 0:
                 visible = _find_visible_in_locator(locator)
                 if visible:
-                    logger.info(f"元素定位成功 [策略={name}]: {s}")
                     return visible, name
-                logger.info(f"元素定位成功 [策略={name}, 不可见兜底]: {s}")
                 return locator.first, name
         except Exception:
             continue
     return None, None
 
 
-def _try_pw_round(page, selector):
-    """第二轮：Playwright 内置智能定位器"""
-    pw_strategies = [
-        ('get_by_label', lambda: page.get_by_label(selector)),
-        ('get_by_role', lambda: page.get_by_role('button', name=selector)),
-        ('get_by_alt_text', lambda: page.get_by_alt_text(selector)),
-    ]
-    for name, factory in pw_strategies:
-        try:
-            locator = factory()
-            if locator.count() > 0:
-                visible = _find_visible_in_locator(locator)
-                if visible:
-                    logger.info(f"元素定位成功 [策略={name}]: {selector}")
-                    return visible, name
-                logger.info(f"元素定位成功 [策略={name}, 不可见兜底]: {selector}")
-                return locator.first, name
-        except Exception:
-            continue
-    return None, None
+# def _try_pw_round(page, selector):
+#     """第二轮：Playwright 内置智能定位器（仅当 selector 为纯文本时有效）"""
+#     # CSS/XPath 选择器不适用 Playwright 文本定位器，直接跳过
+#     if any(c in selector for c in ('[', '#', '.', ':', '/')):
+#         return None, None
+
+#     pw_strategies = [
+#         ('get_by_label', lambda: page.get_by_label(selector)),
+#         ('get_by_text', lambda: page.get_by_text(selector)),
+#         ('get_by_placeholder', lambda: page.get_by_placeholder(selector)),
+#         ('get_by_alt_text', lambda: page.get_by_alt_text(selector)),
+#     ]
+#     # get_by_role：尝试多种常见 role，name 用 selector 作为可访问名称
+#     for role in ['button', 'link', 'textbox', 'checkbox', 'combobox', 'option', 'menuitem', 'listitem']:
+#         pw_strategies.append(
+#             (f'get_by_role_{role}', lambda r=role: page.get_by_role(r, name=selector))
+#         )
+#     for name, factory in pw_strategies:
+#         try:
+#             locator = factory()
+#             if locator.count() > 0:
+#                 visible = _find_visible_in_locator(locator)
+#                 if visible:
+#                     return visible, name
+#                 return locator.first, name
+#         except Exception:
+#             continue
+#     return None, None
 
 
 def _try_fuzzy_round(page, selector):
-    """第三轮：遍历所有可见元素，模糊文本匹配"""
+    """第三轮：遍历所有可见元素，模糊文本匹配（限制遍历数量防卡死）"""
     try:
         all_elements = page.locator('*').all()
+        # 限制遍历数量，防止大页面卡死
+        element_limit = 200
+        checked = 0
         for el in all_elements:
+            if checked >= element_limit:
+                break
+            checked += 1
             try:
-                if not el.is_visible(timeout=500):
+                if not el.is_visible(timeout=200):
                     continue
                 text = (el.inner_text() or '').strip()
                 if text and selector.lower() in text.lower():
-                    logger.info(f"元素定位成功 [策略=fuzzy_all]: text='{text[:50]}'")
                     return el, 'fuzzy_all'
             except Exception:
                 continue
@@ -243,50 +251,50 @@ def _try_infer_round(page, selector):
     """第四轮：根据选择器语义推断元素类型"""
     try:
         sel_lower = selector.lower()
-        if any(kw in sel_lower for kw in ['input', 'text', 'username', 'user', 'name', 'account', '账号', '密码', 'password', 'pass']):
-            if 'pass' in sel_lower or '密码' in sel_lower:
+        # 用正则做词边界匹配，避免 'pass' 匹配到 'bypass'/'passport'
+        is_password = any(kw in sel_lower for kw in ['password', '密码'])
+        if not is_password:
+            import re
+            is_password = bool(re.search(r'\bpass\b', sel_lower))
+        if any(kw in sel_lower for kw in ['input', 'text', 'username', 'user', 'name', 'account', '账号', 'password', '密码']) or is_password:
+            if is_password:
                 for try_sel in ['input[type="password"]', 'input:last-of-type']:
                     loc = page.locator(try_sel)
                     if loc.count() > 0:
-                        logger.info(f"元素定位成功 [策略=infer_input_pass]: {try_sel}")
                         return loc.first, 'infer_input_pass'
             else:
                 for try_sel in ['input[type="text"]', 'input:first-of-type']:
                     loc = page.locator(try_sel)
                     if loc.count() > 0:
-                        logger.info(f"元素定位成功 [策略=infer_input_text]: {try_sel}")
                         return loc.first, 'infer_input_text'
         if any(kw in sel_lower for kw in ['button', 'btn', 'submit', 'click', '登录', '注册', 'search']):
             for try_sel in ['button', 'input[type="submit"]', '[role="button"]']:
                 loc = page.locator(try_sel)
                 if loc.count() > 0:
-                    logger.info(f"元素定位成功 [策略=infer_button]: {try_sel}")
                     return loc.first, 'infer_button'
         if any(kw in sel_lower for kw in ['a[href]', 'link', 'a:has-text']):
             loc = page.locator('a[href]')
             if loc.count() > 0:
-                logger.info(f"元素定位成功 [策略=infer_link]: a[href]")
                 return loc.first, 'infer_link'
     except Exception:
         pass
     return None, None
 
 
+
 # 有序的定位轮次
 _ROUNDS = [
     ('css', _try_css_round),
-    ('pw', _try_pw_round),
     ('fuzzy', _try_fuzzy_round),
     ('infer', _try_infer_round),
 ]
 
 
 def _locate_element(page, selector, timeout=10000):
-    """一次调用返回所有四轮定位的候选元素列表
+    """一次调用返回所有三轮定位的候选元素列表
     
     返回: [(locator, strategy_name), ...]  非空列表，调用方依此尝试
     """
-    page.wait_for_load_state('networkidle')
     candidates = []
     for _, try_fn in _ROUNDS:
         result = try_fn(page, selector)
@@ -366,25 +374,25 @@ def execute_browser_click(args):
                 locator.click(timeout=3000)
                 logger.info(f"点击成功: {selector} [策略={strategy}]")
                 return {'success': True, 'result': f"已点击元素: {selector} [策略={strategy}]"}
-            except Exception as e1:
-                logger.debug(f"标准点击失败 [{strategy}]: {e1}")
+            except Exception:
+                pass
 
             # 2. 强制点击
             try:
                 locator.click(force=True, timeout=3000)
-                logger.info(f"强制点击成功: {selector} [策略={strategy}]")
+                logger.info(f"点击成功: {selector} [策略={strategy}]")
                 return {'success': True, 'result': f"已点击元素: {selector} [策略={strategy}]"}
-            except Exception as e2:
-                logger.debug(f"强制点击失败 [{strategy}]: {e2}")
+            except Exception:
+                pass
 
             # 3. dispatchEvent
             try:
                 locator.dispatch_event('click')
                 page.wait_for_timeout(300)
-                logger.info(f"dispatchEvent 成功: {selector} [策略={strategy}]")
+                logger.info(f"点击成功: {selector} [策略={strategy}]")
                 return {'success': True, 'result': f"已点击元素: {selector} [策略={strategy}]"}
-            except Exception as e3:
-                logger.debug(f"dispatchEvent 失败 [{strategy}]: {e3}")
+            except Exception:
+                pass
 
             # 4. 原生 DOM 点击（最终兜底）
             try:
@@ -398,10 +406,10 @@ def execute_browser_click(args):
                     el.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true, clientX: cx, clientY: cy}));
                 }''')
                 page.wait_for_timeout(500)
-                logger.info(f"原生DOM点击成功: {selector} [策略={strategy}]")
+                logger.info(f"点击成功: {selector} [策略={strategy}]")
                 return {'success': True, 'result': f"已点击元素: {selector} [策略={strategy}]"}
-            except Exception as e4:
-                logger.debug(f"原生DOM点击失败 [{strategy}]: {e4}")
+            except Exception:
+                pass
 
         return {'success': False, 'error': f'所有定位策略点击均失败: {selector}'}
     except Exception as e:
@@ -459,35 +467,6 @@ def execute_browser_get_text(args):
         return {'success': False, 'error': f"获取文本失败: {str(e)}"}
 
 
-def execute_browser_screenshot(args):
-    """截图并保存文件，返回base64"""
-    try:
-        page = _get_page()
-        logger.info(f"截图: {page.url}")
-
-        # 保存截图文件
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        os.makedirs('data/screenshots', exist_ok=True)
-        filepath = f'data/screenshots/{ts}.png'
-        page.screenshot(path=filepath)
-
-        # 返回 base64 用于前端显示
-        screenshot_bytes = page.screenshot(type='png', full_page=False)
-        b64 = base64.b64encode(screenshot_bytes).decode('utf-8')
-        return {
-            'success': True,
-            'result': {
-                'type': 'image_base64',
-                'data': b64,
-                'description': f"当前页面截图 ({page.url})"
-            },
-            'screenshot_path': filepath
-        }
-    except Exception as e:
-        logger.error(f"截图失败: {str(e)}")
-        return {'success': False, 'error': f"截图失败: {str(e)}"}
-
-
 def execute_browser_wait(args):
     """等待"""
     try:
@@ -502,16 +481,33 @@ def execute_browser_wait(args):
 
 
 def execute_browser_select_option(args):
-    """选择下拉框"""
+    """选择下拉框（走4轮定位回退）"""
     try:
         page = _get_page()
-        selector = args['selector']
+        selector = args.get('selector', '')
         value = args['value']
         logger.info(f"选择下拉框: {selector} = {value}")
-        page.select_option(selector, value)
-        return {'success': True, 'result': f"已选择选项: {value}"}
+
+        candidates = _locate_element(page, selector)
+        if not candidates:
+            # 回退：直接使用原始 selector
+            try:
+                page.select_option(selector, value)
+                return {'success': True, 'result': f"已选择选项: {value}"}
+            except Exception as e:
+                return {'success': False, 'error': f'无法定位下拉框且直接选择失败: {str(e)}'}
+
+        for locator, strategy in candidates:
+            try:
+                # Playwright 的 select_option 需要 select 元素上的 locator
+                locator.select_option(value)
+                return {'success': True, 'result': f"已选择选项: {value} [策略={strategy}]"}
+            except Exception:
+                continue
+
+        return {'success': False, 'error': f'所有定位策略选择均失败: {selector}'}
     except Exception as e:
-        logger.error(f"选择失败: {selector} - {str(e)}")
+        logger.error(f"选择失败: {args.get('selector', '?')} - {str(e)}")
         return {'success': False, 'error': f"选择失败: {str(e)}"}
 
 
@@ -536,7 +532,7 @@ BROWSER_TOOL_EXECUTORS = {
     'browser_click': execute_browser_click,
     'browser_fill': execute_browser_fill,
     'browser_get_text': execute_browser_get_text,
-    'browser_screenshot': execute_browser_screenshot,
+    # 'browser_screenshot': execute_browser_screenshot,
     'browser_wait': execute_browser_wait,
     'browser_select_option': execute_browser_select_option,
     'browser_press_key': execute_browser_press_key,
