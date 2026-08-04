@@ -13,7 +13,7 @@ class LLMClient:
     def __init__(self, config):
         self.api_key = config.get('api_key', '')
         self.base_url = config.get('base_url', 'https://api.openai.com').rstrip('/')
-        self.model = config.get('model', 'gpt-4o-mini')
+        self.model = config.get('model', 'deepseek-3.5')
         self.timeout = config.get('timeout', 120)
         self.max_tokens = config.get('max_tokens')
         self.temperature = config.get('temperature', 0.3)
@@ -35,7 +35,6 @@ class LLMClient:
         # 如果有工具，加入工具定义
         if tools:
             payload['tools'] = tools
-            # 不传 tool_choice，让 API 自动决定
             # 某些 API（如 DeepSeek）不支持显式设置 tool_choice
         return payload
 

@@ -246,7 +246,6 @@ def _try_fuzzy_round(page, selector):
         pass
     return None, None
 
-
 def _try_infer_round(page, selector):
     """第四轮：根据选择器语义推断元素类型"""
     try:
