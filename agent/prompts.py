@@ -158,6 +158,7 @@ def _format_element(el):
     name = el.get('name', '')
     sel = el.get('selector', '')
     role = el.get('role', '')
+    dom_label = el.get('label', '')  # DOM 中关联的 <label> 文本
 
-    label = aria or placeholder or text or name or role or ''
+    label = dom_label or aria or placeholder or text or name or role or ''
     return f'{tag}[{sel}] {label}'[:120]

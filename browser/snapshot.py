@@ -70,6 +70,21 @@ class PageSnapshot:
                     return 'page';
                 }
 
+                // 获取 input 的关联 label 文本
+                function getLabelText(el) {
+                    // 直接包裹在 label 内
+                    if (el.parentElement && el.parentElement.tagName === 'LABEL') {
+                        return (el.parentElement.innerText || '').trim().slice(0, 50);
+                    }
+                    // 通过 for 属性关联
+                    const id = el.id;
+                    if (id) {
+                        const label = document.querySelector('label[for="' + CSS.escape(id) + '"]');
+                        if (label) return (label.innerText || '').trim().slice(0, 50);
+                    }
+                    return '';
+                }
+
                 document.querySelectorAll(tags).forEach(el => {
                     const rect = el.getBoundingClientRect();
                     if (rect.width === 0 && rect.height === 0) return;
@@ -87,7 +102,8 @@ class PageSnapshot:
                         title: el.getAttribute('title') || '',
                         container: container,
                         role: el.getAttribute('role') || '',
-                        class: (el.className || '').toString().slice(0, 30)
+                        class: (el.className || '').toString().slice(0, 30),
+                        label: el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' ? getLabelText(el) : ''
                     });
                 });
                 return results;
@@ -120,7 +136,6 @@ class PageSnapshot:
     def _build_selector(self, tag, attrs, text):
         """构建元素选择器（返回全部候选，优先级从高到低）
         
-        返回: [主选择器, 备选1, 备选2, ...] 或空列表
         优先级: #id > [aria-label] > :has-text() > [placeholder] > [name] > [href] > [value] > [type]
         """
         selectors = []
@@ -129,7 +144,6 @@ class PageSnapshot:
         if attrs.get('aria_label'):
             selectors.append(f'{tag}[aria-label={_css_quote(attrs["aria_label"])}]')
         if text and len(text) < 80:
-            # 规范化空白：多个连续空白→单个空格，保留中文字符间的真实空格
             clean_text = ' '.join(text.split())
             sel = f':has-text({_css_quote(clean_text)})'
             if tag == 'button':
