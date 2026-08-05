@@ -141,167 +141,47 @@ def _get_page():
 
 
 def _find_visible_in_locator(locator, max_check=20):
-    """遍历 locator 的所有匹配，返回第一个可见元素"""
+    """遍历 locator 的所有匹配，返回所有可见元素"""
+    results = []
     count = locator.count()
     for i in range(min(count, max_check)):
         el = locator.nth(i)
         try:
             if el.is_visible(timeout=300):
-                return el
+                results.append(el)
         except Exception:
             continue
-    return None
+    return results
 
+def _locate_element(page, selector, timeout=5000):
+    """定位元素：直接使用选择器定位，等待异步渲染
 
-def _try_css_round(page, selector):
-    """第一轮：CSS 选择器策略（精确 → 包含 → 文本兜底）"""
-    strategies = [
-        # 精确匹配优先
-        ('css', selector),
-        ('aria_label', f'[aria-label="{selector}"]'),
-        ('placeholder', f'[placeholder="{selector}"]'),
-        ('alt_text', f'[alt="{selector}"]'),
-        ('title', f'[title="{selector}"]'),
-        # 包含匹配
-        ('aria_label_contains', f'[aria-label*="{selector}"]'),
-        ('placeholder_contains', f'[placeholder*="{selector}"]'),
-        ('alt_contains', f'[alt*="{selector}"]'),
-        ('title_contains', f'[title*="{selector}"]'),
-        # 非标准输入框兜底：div 充当 input（contenteditable / role=textbox）
-        ('contenteditable', '[contenteditable="true"]'),
-        ('aria_role_textbox', '[role="textbox"]'),
-        # 文本匹配兜底（最宽泛，放最后）
-        ('text', f'text={selector}'),
-        ('has_text', f':has-text("{selector}")'),
-    ]
-    # 去标签化：input[name='wd'] → [name='wd']（匹配 div 伪装的输入框）
-    if '[' in selector:
-        bracket = selector.index('[')
-        prefix = selector[:bracket].strip()
-        if prefix and prefix.replace('-', '').isalpha():
-            strategies.insert(-2, ('tagless', selector[bracket:]))
-    for name, s in strategies:
-        try:
-            locator = page.locator(s)
-            if locator.count() > 0:
-                visible = _find_visible_in_locator(locator)
-                if visible:
-                    return visible, name
-                return locator.first, name
-        except Exception:
-            continue
-    return None, None
-
-
-# def _try_pw_round(page, selector):
-#     """第二轮：Playwright 内置智能定位器（仅当 selector 为纯文本时有效）"""
-#     # CSS/XPath 选择器不适用 Playwright 文本定位器，直接跳过
-#     if any(c in selector for c in ('[', '#', '.', ':', '/')):
-#         return None, None
-
-#     pw_strategies = [
-#         ('get_by_label', lambda: page.get_by_label(selector)),
-#         ('get_by_text', lambda: page.get_by_text(selector)),
-#         ('get_by_placeholder', lambda: page.get_by_placeholder(selector)),
-#         ('get_by_alt_text', lambda: page.get_by_alt_text(selector)),
-#     ]
-#     # get_by_role：尝试多种常见 role，name 用 selector 作为可访问名称
-#     for role in ['button', 'link', 'textbox', 'checkbox', 'combobox', 'option', 'menuitem', 'listitem']:
-#         pw_strategies.append(
-#             (f'get_by_role_{role}', lambda r=role: page.get_by_role(r, name=selector))
-#         )
-#     for name, factory in pw_strategies:
-#         try:
-#             locator = factory()
-#             if locator.count() > 0:
-#                 visible = _find_visible_in_locator(locator)
-#                 if visible:
-#                     return visible, name
-#                 return locator.first, name
-#         except Exception:
-#             continue
-#     return None, None
-
-
-def _try_fuzzy_round(page, selector):
-    """第三轮：遍历所有可见元素，模糊文本匹配（限制遍历数量防卡死）"""
-    try:
-        all_elements = page.locator('*').all()
-        # 限制遍历数量，防止大页面卡死
-        element_limit = 200
-        checked = 0
-        for el in all_elements:
-            if checked >= element_limit:
-                break
-            checked += 1
-            try:
-                if not el.is_visible(timeout=200):
-                    continue
-                text = (el.inner_text() or '').strip()
-                if text and selector.lower() in text.lower():
-                    return el, 'fuzzy_all'
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return None, None
-
-def _try_infer_round(page, selector):
-    """第四轮：根据选择器语义推断元素类型"""
-    try:
-        sel_lower = selector.lower()
-        # 用正则做词边界匹配，避免 'pass' 匹配到 'bypass'/'passport'
-        is_password = any(kw in sel_lower for kw in ['password', '密码'])
-        if not is_password:
-            import re
-            is_password = bool(re.search(r'\bpass\b', sel_lower))
-        if any(kw in sel_lower for kw in ['input', 'text', 'username', 'user', 'name', 'account', '账号', 'password', '密码']) or is_password:
-            if is_password:
-                for try_sel in ['input[type="password"]', 'input:last-of-type']:
-                    loc = page.locator(try_sel)
-                    if loc.count() > 0:
-                        return loc.first, 'infer_input_pass'
-            else:
-                for try_sel in ['input[type="text"]', 'input:first-of-type']:
-                    loc = page.locator(try_sel)
-                    if loc.count() > 0:
-                        return loc.first, 'infer_input_text'
-        if any(kw in sel_lower for kw in ['button', 'btn', 'submit', 'click', '登录', '注册', 'search']):
-            for try_sel in ['button', 'input[type="submit"]', '[role="button"]']:
-                loc = page.locator(try_sel)
-                if loc.count() > 0:
-                    return loc.first, 'infer_button'
-        if any(kw in sel_lower for kw in ['a[href]', 'link', 'a:has-text']):
-            loc = page.locator('a[href]')
-            if loc.count() > 0:
-                return loc.first, 'infer_link'
-    except Exception:
-        pass
-    return None, None
-
-
-
-# 有序的定位轮次
-_ROUNDS = [
-    ('css', _try_css_round),
-    ('fuzzy', _try_fuzzy_round),
-    ('infer', _try_infer_round),
-]
-
-
-def _locate_element(page, selector, timeout=10000):
-    """一次调用返回所有三轮定位的候选元素列表
-    
-    返回: [(locator, strategy_name), ...]  非空列表，调用方依此尝试
+    返回: [(locator, strategy_name), ...]  非空列表，每个可见匹配作为独立候选
     """
-    candidates = []
-    for _, try_fn in _ROUNDS:
-        result = try_fn(page, selector)
-        if result is not None:
-            candidates.append(result)
-    if not candidates:
-        logger.warning(f"元素定位失败，所有策略均无效: {selector}")
-    return candidates
+    try:
+        locator = page.locator(selector)
+        if locator.count() > 0:
+            visible_list = _find_visible_in_locator(locator)
+            if visible_list:
+                return [(el, 'direct') for el in visible_list]
+            return [(locator.first, 'direct')]
+
+        # 元素可能还在异步渲染，等待后重试
+        try:
+            page.wait_for_selector(selector, timeout=timeout, state='attached')
+            locator = page.locator(selector)
+            visible_list = _find_visible_in_locator(locator)
+            if visible_list:
+                return [(el, 'wait') for el in visible_list]
+            return [(locator.first, 'wait')]
+        except Exception:
+            pass
+
+        logger.warning(f"元素定位失败: {selector}")
+        return []
+    except Exception as e:
+        logger.warning(f"元素定位异常: {selector} - {str(e)}")
+        return []
 
 
 def execute_browser_navigate(args):
@@ -350,7 +230,7 @@ def execute_browser_get_page_state(args):
 
 
 def execute_browser_click(args):
-    """点击元素（4轮定位 × 4级点击兜底）"""
+    """点击元素（选择器定位 + 4级点击兜底）"""
     try:
         page = _get_page()
         selector = args['selector']
@@ -480,7 +360,7 @@ def execute_browser_wait(args):
 
 
 def execute_browser_select_option(args):
-    """选择下拉框（走4轮定位回退）"""
+    """选择下拉框（选择器定位，直接选择兜底）"""
     try:
         page = _get_page()
         selector = args.get('selector', '')
