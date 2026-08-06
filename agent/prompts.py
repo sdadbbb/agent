@@ -49,7 +49,11 @@ URL: {url}
 {history}
 
 【工具】click(selector) | fill(selector, text) | get_text(selector) | wait(ms) | select_option(selector, value) | press_key(key) | visual_click(description)
-【visual_click说明】当元素没有selector（如纯图标、Canvas按钮），或现有选择器定位失败时，使用 visual_click 通过截图识别并点击。传入自然语言描述，如 "visual_click('右上角的搜索图标')"。
+【visual_click 强限制】visual_click 速度慢、成本高，仅在以下情况之一才可使用：
+  1. 目标元素在上方元素列表中 selector 为 "-"（说明无可用选择器）
+  2. 已经用 click(selector) 尝试过且执行结果返回了"失败"
+其他任何情况（包括"不确定选哪个选择器"、"描述看起来像图标"等）一律不允许使用 visual_click，必须从元素列表中复制 selector 用 click。
+调用格式：{{"tool": "browser_visual_click", "args": {{"description": "元素的中文描述"}}}}
 
 【批量规则】支持数组格式一次输出多步。fill/wait/select_option/press_key 可批量，click/visual_click 必须放批次末尾。示例：
 [{{"tool": "browser_fill", "args": {{"selector": "...", "text": "..."}}}},
@@ -59,7 +63,7 @@ URL: {url}
 
 【规则】
 - selector 必须从上方元素列表复制（格式 tag[selector] label），禁止自行构造
-- fill/select_option/press_key 后无需验证；click 后需验证
+- fill/select_option/press_key 后无需验证；click/visual_click 后需验证
 - 完成后返回: {{"tool": "done", "args": {{"report": "结论"}}}}
 - done 单独输出，不放入批次
 

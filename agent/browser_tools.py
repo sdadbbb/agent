@@ -452,15 +452,16 @@ def execute_browser_visual_click(args):
             '- x和y是相对于截图左上角的像素坐标\n'
             '- 如果元素完全不在截图中，设置found=false, visible=false\n'
             '- 如果元素在截图中但被遮挡，设置found=true, visible=false\n'
+            '- 如果页面存在弹窗/对话框/遮罩层，目标元素必须位于弹窗内部，不要选取被弹窗遮挡的底层元素\n'
             '- 只返回JSON，不要加任何其他文字'
         )
         response = _vision_client.chat_with_image(image_url, prompt)
-        logger.info(f"视觉模型回复: {response[:300]}")
+        logger.info(f"视觉模型回复: {response}")
 
         # 3. 解析坐标
         match = re.search(r'\{[\s\S]*\}', response)
         if not match:
-            return {'success': False, 'error': f'无法解析视觉模型返回: {response[:200]}'}
+            return {'success': False, 'error': f'无法解析视觉模型返回: {response}'}
 
         result = _json.loads(match.group(0))
         if not result.get('found'):
