@@ -155,7 +155,6 @@ def _find_visible_in_locator(locator, max_check=20):
 
 def _locate_element(page, selector, timeout=5000):
     """定位元素：直接使用选择器定位，等待异步渲染
-
     返回: [(locator, strategy_name), ...]  非空列表，每个可见匹配作为独立候选
     """
     try:
@@ -256,14 +255,6 @@ def execute_browser_click(args):
             except Exception:
                 pass
 
-            # 2. 强制点击
-            try:
-                locator.click(force=True, timeout=3000)
-                logger.info(f"点击成功: {selector} [策略={strategy}]")
-                return {'success': True, 'result': f"已点击元素: {selector} [策略={strategy}]"}
-            except Exception:
-                pass
-
             # 3. dispatchEvent
             try:
                 locator.dispatch_event('click')
@@ -273,7 +264,7 @@ def execute_browser_click(args):
             except Exception:
                 pass
 
-            # 4. 原生 DOM 点击（最终兜底）
+            # 4. 原生 DOM 点击
             try:
                 locator.evaluate('''el => {
                     el.scrollIntoView({block: "center"});
