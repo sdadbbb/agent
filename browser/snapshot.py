@@ -124,13 +124,15 @@ class PageSnapshot:
                     el['selectors'] = candidates
         except Exception as e:
             logger.error(f"获取交互元素失败: {str(e)}")
-        # 按容器分组输出日志
-        containers = {}
+        # 逐元素输出日志
+        lines = []
         for e in elements:
-            c = e.get('container', 'page')
-            containers.setdefault(c, []).append(e['tag'])
-        container_summary = ', '.join([f"{c}({len(v)}个)" for c, v in containers.items()])
-        logger.info(f"捕获到 {len(elements)} 个交互元素（容器: {container_summary}）")
+            sel = e.get('selector') or '-'
+            label = e.get('label') or e.get('aria_label') or e.get('text') or e.get('placeholder') or '-'
+            container = e.get('container', 'page')
+            tag = e.get('tag', '?')
+            lines.append(f"  {tag}[{sel}] {label}")
+        logger.info(f"捕获到 {len(elements)} 个交互元素:\n" + '\n'.join(lines))
         return elements
 
     def _build_selector(self, tag, attrs, text):
