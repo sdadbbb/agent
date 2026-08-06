@@ -14,6 +14,23 @@ def set_page(page):
     _current_page = page
 
 
+# 视觉模型客户端（由引擎在初始化时设置）
+_vision_client = None
+_server_base_url = 'http://localhost:5000'
+
+
+def set_vision_client(client):
+    """设置视觉模型客户端"""
+    global _vision_client
+    _vision_client = client
+
+
+def set_server_base_url(url):
+    """设置服务器基础URL（用于视觉模型下载截图）"""
+    global _server_base_url
+    _server_base_url = url
+
+
 # ==================== 工具规范 ====================
 
 BROWSER_TOOLS_SPEC = [
@@ -125,6 +142,20 @@ BROWSER_TOOLS_SPEC = [
                     "key": {"type": "string", "description": "按键名称，如 Enter, Escape, Tab, ArrowDown"}
                 },
                 "required": ["key"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_visual_click",
+            "description": "通过截图+视觉模型定位并点击元素。适用于DOM选择器无法定位的元素（如纯图标按钮、Canvas元素、无文本标签的按钮等）。传入元素的自然语言描述即可。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string", "description": "要点击元素的自然语言描述，如'搜索图标'、'右上角的用户头像'、'表单底部的蓝色提交按钮'"}
+                },
+                "required": ["description"]
             }
         }
     }
@@ -394,6 +425,70 @@ def execute_browser_press_key(args):
         return {'success': False, 'error': f"按键失败: {str(e)}"}
 
 
+def execute_browser_visual_click(args):
+    """通过视觉模型定位元素并点击"""
+    import os
+    import json as _json
+    import re
+    from datetime import datetime
+
+    try:
+        page = _get_page()
+        description = args['description']
+        logger.info(f"视觉定位点击: {description}")
+
+        if _vision_client is None:
+            return {'success': False, 'error': '视觉模型未配置，请在 config.yml 中配置 vision 节点'}
+
+        # 1. 截图存盘（视口截图，坐标与 page.mouse.click 一一对应）
+        ss_dir = 'data/screenshots'
+        os.makedirs(ss_dir, exist_ok=True)
+        ss_name = f'visual_{datetime.now().strftime("%Y%m%d_%H%M%S_%f")}.png'
+        ss_path = os.path.join(ss_dir, ss_name)
+        page.screenshot(path=ss_path, type='png', full_page=False)
+        image_url = f'{_server_base_url}/api/files/screenshots/{ss_name}'
+
+        # 2. 发送给视觉模型定位
+        prompt = (
+            f'在这张网页截图中找到"{description}"。\n\n'
+            '请严格返回以下JSON格式（不要加markdown代码块）：\n'
+            '{"found": true/false, "x": 中心点x像素坐标, "y": 中心点y像素坐标, '
+            '"visible": true/false, "confidence": 0.0-1.0, '
+            '"description": "该元素的简要外观描述"}\n\n'
+            '注意：\n'
+            '- x和y是相对于截图左上角的像素坐标\n'
+            '- 如果元素完全不在截图中，设置found=false, visible=false\n'
+            '- 如果元素在截图中但被遮挡，设置found=true, visible=false\n'
+            '- 只返回JSON，不要加任何其他文字'
+        )
+        response = _vision_client.chat_with_image(image_url, prompt)
+        logger.info(f"视觉模型回复: {response[:300]}")
+
+        # 3. 解析坐标
+        match = re.search(r'\{[\s\S]*\}', response)
+        if not match:
+            return {'success': False, 'error': f'无法解析视觉模型返回: {response[:200]}'}
+
+        result = _json.loads(match.group(0))
+        if not result.get('found'):
+            return {'success': False, 'error': f'视觉模型未找到目标: {description}'}
+
+        x, y = result['x'], result['y']
+        conf = result.get('confidence', 0)
+        logger.info(f"视觉定位成功: ({x}, {y}) 置信度={conf} - {result.get('description', '')}")
+
+        # 4. 点击
+        page.mouse.click(x, y)
+        return {
+            'success': True,
+            'result': f'已视觉定位点击: {description} (坐标 {x},{y}, 置信度 {conf})'
+        }
+
+    except Exception as e:
+        logger.error(f"视觉定位点击失败: {str(e)}")
+        return {'success': False, 'error': f"视觉定位点击失败: {str(e)}"}
+
+
 # ==================== 执行器映射 ====================
 
 BROWSER_TOOL_EXECUTORS = {
@@ -406,4 +501,5 @@ BROWSER_TOOL_EXECUTORS = {
     'browser_wait': execute_browser_wait,
     'browser_select_option': execute_browser_select_option,
     'browser_press_key': execute_browser_press_key,
+    'browser_visual_click': execute_browser_visual_click,
 }

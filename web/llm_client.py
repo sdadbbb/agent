@@ -12,7 +12,7 @@ class LLMClient:
 
     def __init__(self, config):
         self.api_key = config.get('api_key', '')
-        self.base_url = config.get('base_url', 'https://api.openai.com').rstrip('/')
+        self.base_url = config.get('base_url', '默认大模型url').rstrip('/')
         self.model = config.get('model', 'deepseek-3.5')
         self.timeout = config.get('timeout', 120)
         self.max_tokens = config.get('max_tokens')
@@ -111,3 +111,23 @@ class LLMClient:
             logger.info(f"LLM 直接回复文本, 长度: {len(result.get('content', ''))} 字符")
 
         return result
+
+    def chat_with_image(self, image_url, prompt):
+        """视觉对话：传入图片URL和文字描述，返回模型回复"""
+        if not self.is_configured():
+            raise ValueError('请在 config/config.yml 中配置 vision.api_key')
+
+        messages = [{
+            'role': 'user',
+            'content': [
+                {'type': 'image_url', 'image_url': {'url': image_url}},
+                {'type': 'text', 'text': prompt}
+            ]
+        }]
+
+        payload = self._build_payload(messages, temperature=0.1)
+        payload.pop('tools', None)
+        data = self._request(payload)
+        content = data['choices'][0]['message']['content']
+        logger.info(f"视觉模型回复长度: {len(content)} 字符")
+        return content

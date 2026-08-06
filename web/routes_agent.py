@@ -23,6 +23,16 @@ def _create_llm_client():
     return LLMClient(llm_config)
 
 
+def _create_vision_client():
+    """创建视觉模型客户端"""
+    from util.file_util import FileUtil
+    config = FileUtil.read_yaml(FileUtil.get_config_path())
+    vision_config = config.get('vision', {})
+    if vision_config.get('api_key'):
+        return LLMClient(vision_config)
+    return None
+
+
 @agent_bp.route('/api/agent/execute', methods=['POST'])
 def execute_agent():
     """启动 Agent 执行"""
@@ -34,7 +44,8 @@ def execute_agent():
 
     try:
         llm_client = _create_llm_client()
-        engine = AgentEngine(llm_client)
+        vision_client = _create_vision_client()
+        engine = AgentEngine(llm_client, vision_llm_client=vision_client)
         task_id = f'task_{__import__("datetime").datetime.now().strftime("%Y%m%d%H%M%S%f")}'
 
         # 创建队列用于 SSE 通信

@@ -7,7 +7,7 @@ from log.logger import LoggerUtil
 from browser.manager import browser_manager
 from browser.snapshot import PageSnapshot
 from agent.prompts import build_navigate_prompt, build_step_prompt
-from agent.browser_tools import BROWSER_TOOLS_SPEC, BROWSER_TOOL_EXECUTORS, set_page
+from agent.browser_tools import BROWSER_TOOLS_SPEC, BROWSER_TOOL_EXECUTORS, set_page, set_vision_client, set_server_base_url
 from agent.case_tools import CASE_TOOLS_SPEC, CASE_TOOL_EXECUTORS
 from executor.result_recorder import ResultRecorder
 
@@ -31,6 +31,7 @@ TOOL_NAME_CN = {
     'browser_press_key': '按键操作',
     'browser_screenshot': '截图',
     'browser_get_page_state': '获取页面状态',
+    'browser_visual_click': '视觉定位点击',
     'save_test_result': '保存测试结果',
     'query_test_history': '查询历史记录',
     'done': '任务完成',
@@ -42,7 +43,7 @@ class AgentEngine:
 
     MAX_STEPS = 50
 
-    def __init__(self, llm_client):
+    def __init__(self, llm_client, vision_llm_client=None, server_port=5000):
         self.llm_client = llm_client
         self.page = None
         self.step_log = []
@@ -53,6 +54,10 @@ class AgentEngine:
         self._on_step_callback = None
         self._screenshots_dir_ok = False
         self._conversation = []  # 多轮对话上下文
+        # 注入视觉模型客户端和服务器URL
+        if vision_llm_client:
+            set_vision_client(vision_llm_client)
+        set_server_base_url(f'http://localhost:{server_port}')
 
     @staticmethod
     def _tool_cn(tool_name):
@@ -93,6 +98,9 @@ class AgentEngine:
             return cn
         elif tool_name == 'done':
             return cn
+        elif tool_name == 'browser_visual_click':
+            desc = args.get('description', '')
+            return f'{cn}：{desc}'
         return cn
 
     def set_callback(self, callback):
@@ -404,7 +412,7 @@ class AgentEngine:
             tool = step.get('tool', '')
             args = step.get('args', {})
             selector = args.get('selector', '')
-            if not selector or tool in ('done', 'browser_wait', 'browser_press_key', 'browser_screenshot', 'browser_get_page_state'):
+            if not selector or tool in ('done', 'browser_wait', 'browser_press_key', 'browser_screenshot', 'browser_get_page_state', 'browser_visual_click'):
                 continue
             if selector not in valid_selectors:
                 logger.warning(

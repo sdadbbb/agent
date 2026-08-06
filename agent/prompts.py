@@ -49,9 +49,10 @@ URL: {url}
 【已完成】
 {history}
 
-【工具】click(selector) | fill(selector, text) | get_text(selector) | wait(ms) | select_option(selector, value) | press_key(key)
+【工具】click(selector) | fill(selector, text) | get_text(selector) | wait(ms) | select_option(selector, value) | press_key(key) | visual_click(description)
+【visual_click说明】当元素没有selector（如纯图标、Canvas按钮），或现有选择器定位失败时，使用 visual_click 通过截图识别并点击。传入自然语言描述，如 "visual_click('右上角的搜索图标')"。
 
-【批量规则】支持数组格式一次输出多步。fill/wait/select_option/press_key 可批量，click 必须放批次末尾。示例：
+【批量规则】支持数组格式一次输出多步。fill/wait/select_option/press_key 可批量，click/visual_click 必须放批次末尾。示例：
 [{{"tool": "browser_fill", "args": {{"selector": "...", "text": "..."}}}},
  {{"tool": "browser_click", "args": {{"selector": "..."}}}}]
 
