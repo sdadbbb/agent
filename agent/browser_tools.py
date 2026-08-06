@@ -142,16 +142,16 @@ def _get_page():
 
 def _find_visible_in_locator(locator, max_check=20):
     """遍历 locator 的所有匹配，返回所有可见元素"""
-    results = []
+    lists = []
     count = locator.count()
     for i in range(min(count, max_check)):
         el = locator.nth(i)
         try:
             if el.is_visible(timeout=300):
-                results.append(el)
+                lists.append(el)
         except Exception:
             continue
-    return results
+    return lists
 
 def _locate_element(page, selector, timeout=5000):
     """定位元素：直接使用选择器定位，等待异步渲染
