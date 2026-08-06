@@ -10,7 +10,6 @@ from agent.engine import AgentEngine
 logger = LoggerUtil.get_logger()
 agent_bp = Blueprint('agent', __name__)
 
-# 存储正在运行的 Agent 任务
 _active_tasks = {}
 _task_queues = {}
 
@@ -48,7 +47,6 @@ def execute_agent():
         engine = AgentEngine(llm_client, vision_llm_client=vision_client)
         task_id = f'task_{__import__("datetime").datetime.now().strftime("%Y%m%d%H%M%S%f")}'
 
-        # 创建队列用于 SSE 通信
         msg_queue = queue.Queue()
         _task_queues[task_id] = msg_queue
         _active_tasks[task_id] = engine
@@ -58,7 +56,6 @@ def execute_agent():
 
         engine.set_callback(on_step)
 
-        # 在后台线程执行
         def run():
             try:
                 result = engine.execute(task, case_name=case_name)

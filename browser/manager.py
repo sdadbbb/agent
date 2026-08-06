@@ -92,5 +92,4 @@ class BrowserManager:
         return self._page is not None and not self._page.is_closed()
 
 
-# 全局实例
 browser_manager = BrowserManager()

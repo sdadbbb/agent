@@ -29,13 +29,10 @@ class LLMClient:
             'messages': messages,
             'temperature': temperature if temperature is not None else self.temperature,
         }
-        # 只有 max_tokens 不为 None 且不为 0 时才加入
         if self.max_tokens:
             payload['max_tokens'] = self.max_tokens
-        # 如果有工具，加入工具定义
         if tools:
             payload['tools'] = tools
-            # 某些 API（如 DeepSeek）不支持显式设置 tool_choice
         return payload
 
     def _request(self, payload):

@@ -13,14 +13,12 @@ from executor.result_recorder import ResultRecorder
 
 logger = LoggerUtil.get_logger()
 
-# 合并所有工具规范和执行器
 ALL_TOOLS_SPEC = BROWSER_TOOLS_SPEC + CASE_TOOLS_SPEC
 ALL_TOOL_EXECUTORS = {}
 ALL_TOOL_EXECUTORS.update(BROWSER_TOOL_EXECUTORS)
 ALL_TOOL_EXECUTORS.update(CASE_TOOL_EXECUTORS)
 
 
-# 工具名 → 中文映射
 TOOL_NAME_CN = {
     'browser_navigate': '打开页面',
     'browser_click': '点击元素',

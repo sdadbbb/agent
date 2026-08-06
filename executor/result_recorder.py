@@ -23,7 +23,6 @@ class ResultRecorder:
             task = result.get('task', '未命名任务')
             case_name = result.get('case_name', '') or task[:50]
 
-            # 1. 保存用例（含执行步骤）
             case = TestCase(
                 name=case_name,
                 task=task,
@@ -31,7 +30,6 @@ class ResultRecorder:
             )
             cm.save_case(case)
 
-            # 2. 保存报告（结果+截图，不含步骤）
             report = ReportResult(
                 case_id=case.id,
                 passed=result.get('success', False),

@@ -4,7 +4,6 @@ from browser.snapshot import PageSnapshot
 
 logger = LoggerUtil.get_logger()
 
-# 当前页面对象（由引擎在初始化时设置）
 _current_page = None
 
 
@@ -14,7 +13,6 @@ def set_page(page):
     _current_page = page
 
 
-# 视觉模型客户端（由引擎在初始化时设置）
 _vision_client = None
 _server_base_url = 'http://localhost:5000'
 
@@ -30,8 +28,6 @@ def set_server_base_url(url):
     global _server_base_url
     _server_base_url = url
 
-
-# ==================== 工具规范 ====================
 
 BROWSER_TOOLS_SPEC = [
     {
@@ -160,9 +156,6 @@ BROWSER_TOOLS_SPEC = [
         }
     }
 ]
-
-
-# ==================== 工具执行函数 ====================
 
 def _get_page():
     """获取当前页面"""
@@ -489,15 +482,12 @@ def execute_browser_visual_click(args):
         return {'success': False, 'error': f"视觉定位点击失败: {str(e)}"}
 
 
-# ==================== 执行器映射 ====================
-
 BROWSER_TOOL_EXECUTORS = {
     'browser_navigate': execute_browser_navigate,
     'browser_get_page_state': execute_browser_get_page_state,
     'browser_click': execute_browser_click,
     'browser_fill': execute_browser_fill,
     'browser_get_text': execute_browser_get_text,
-    # 'browser_screenshot': execute_browser_screenshot,
     'browser_wait': execute_browser_wait,
     'browser_select_option': execute_browser_select_option,
     'browser_press_key': execute_browser_press_key,

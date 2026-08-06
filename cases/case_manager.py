@@ -24,8 +24,6 @@ class CaseManager:
     def _get_result_path(self, case_id):
         return os.path.join(self.results_dir, f'{case_id}.json')
 
-    # ─── 用例元数据操作 ──────────────────────────────
-
     def save_case(self, case: TestCase) -> TestCase:
         """保存用例元数据"""
         filepath = self._get_filepath(case.id)
@@ -97,8 +95,6 @@ class CaseManager:
             'page_size': page_size,
             'total_pages': (total + page_size - 1) // page_size if total > 0 else 1
         }
-
-    # ─── 报告（执行结果）操作 ──────────────────────────
 
     def save_result(self, result: ReportResult):
         """保存执行结果到 results/ 目录"""

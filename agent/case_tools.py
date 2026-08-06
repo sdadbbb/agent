@@ -48,7 +48,6 @@ CASE_TOOLS_SPEC = [
 def execute_save_test_result(args):
     """保存测试结果"""
     try:
-        # 1. 保存用例（含执行步骤摘要）
         case = TestCase(
             name=args['case_name'],
             description=args.get('description', ''),
@@ -57,7 +56,6 @@ def execute_save_test_result(args):
         )
         saved = case_manager.save_case(case)
 
-        # 2. 保存报告结果
         report = ReportResult(
             case_id=saved.id,
             passed=args['passed'],
